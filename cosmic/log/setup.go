@@ -16,15 +16,16 @@ const (
 )
 
 var logFormat = logging.MustStringFormatter(
-	"%{color}%{time:15:04:05.000} %{module} ▶ %{level:-7s}%{color:reset} %{message}",
+	"%{color}%{time:15:04:05.000} %{module:-4s} ▶ %{level:-7s}%{color:reset} %{message}",
 )
 
 const coreLogName = "CORE"
+const appLogName = "APP"
 
 var coreLog *logging.Logger
 var appLog *logging.Logger
 
-func Init(appLevel, coreLevel Level, appName string) {
+func Init(appLevel, coreLevel Level) {
 	// Init stdErr logging backend
 	backend := logging.NewLogBackend(os.Stderr, "", 0)
 	backendFormatter := logging.NewBackendFormatter(backend, logFormat)
@@ -46,17 +47,17 @@ func Init(appLevel, coreLevel Level, appName string) {
 	}
 
 	// Init app logger
-	appLog = logging.MustGetLogger(appName)
+	appLog = logging.MustGetLogger(appLogName)
 	switch appLevel {
 	case DebugLevel:
-		logging.SetLevel(logging.DEBUG, appName)
+		logging.SetLevel(logging.DEBUG, appLogName)
 	case NoticeLevel:
-		logging.SetLevel(logging.NOTICE, appName)
+		logging.SetLevel(logging.NOTICE, appLogName)
 	case WarnLevel:
-		logging.SetLevel(logging.WARNING, appName)
+		logging.SetLevel(logging.WARNING, appLogName)
 	case ErrorLevel:
-		logging.SetLevel(logging.ERROR, appName)
+		logging.SetLevel(logging.ERROR, appLogName)
 	default:
-		logging.SetLevel(logging.INFO, appName)
+		logging.SetLevel(logging.INFO, appLogName)
 	}
 }
