@@ -40,7 +40,7 @@ const (
 )
 
 type Event interface {
-	Type() Type
+	Type() Type // TODO redundant?
 	Category() Category
 	String() string
 
@@ -50,19 +50,6 @@ type Event interface {
 
 func IsInCategory(e Event, c Category) bool {
 	return (e.Category() & c) != 0
-}
-
-// CallHandlerForMatch calls the given function with the given event if that
-// event's type matches t and the event was not handled in a previous layer. It
-// prevents having to write this boilerplate in every event handling function.
-// The given handler function is responsible for casting the event to its
-// underlying type.
-func CallHandlerForMatch(e Event, t Type, handler func(e Event)) {
-	if e.Type() != t || e.IsHandled() {
-		return
-	}
-
-	handler(e)
 }
 
 type baseEvent struct {

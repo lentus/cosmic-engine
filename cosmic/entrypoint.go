@@ -5,8 +5,8 @@ import (
 )
 
 func Run(app *Application) {
-	log.Init(log.DebugLevel)
+	log.Init(log.DebugLevel, log.DebugLevel, app.Name)
 
-	log.Info("Starting application %s", app.Name)
+	log.InfofCore("Starting application %s", app.Name)
 	app.run()
 }
