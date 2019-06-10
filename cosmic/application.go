@@ -1,6 +1,7 @@
 package cosmic
 
 import (
+	"github.com/lentus/cosmic-engine/cosmic/event"
 	"github.com/lentus/cosmic-engine/cosmic/layer"
 	"github.com/lentus/cosmic-engine/cosmic/log"
 )
@@ -19,21 +20,9 @@ func (app *Application) run() {
 
 	for app.running {
 		// Update all layers
-		app.layerStack.ForEachAscending(func(l layer.Layer) {
-			l.OnUpdate()
-		})
-
-		log.DebugCore(app.Name)
-		log.InfoCore(app.Name)
-		log.NoticeCore(app.Name)
-		log.WarnCore(app.Name)
-		log.ErrorCore(app.Name)
-
-		log.Debug(app.Name)
-		log.Info(app.Name)
-		log.Notice(app.Name)
-		log.Warn(app.Name)
-		log.Error(app.Name)
+		for it := app.layerStack.Bottom(); it.Next(); {
+			it.Get().OnUpdate()
+		}
 
 		app.running = false
 	}
@@ -45,4 +34,16 @@ func (app *Application) PushLayer(l layer.Layer) {
 
 func (app *Application) PushOverlay(l layer.Layer) {
 	app.layerStack.PushOverlay(l)
+}
+
+func (app *Application) OnEvent(e event.Event) {
+	log.InfoCore(e.String())
+
+	for it := app.layerStack.Top(); it.Prev(); {
+		it.Get().OnEvent(e)
+
+		if e.IsHandled() {
+			break
+		}
+	}
 }
