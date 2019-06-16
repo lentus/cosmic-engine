@@ -7,7 +7,8 @@ import (
 )
 
 type Application struct {
-	Name       string
+	Name string
+
 	layerStack layer.Stack
 
 	// Signals whether the application should close. Setting this to false
@@ -37,7 +38,7 @@ func (app *Application) PushOverlay(l layer.Layer) {
 }
 
 func (app *Application) OnEvent(e event.Event) {
-	log.InfoCore(e.String())
+	log.DebugCore(e.String())
 
 	for it := app.layerStack.Top(); it.Prev(); {
 		it.Get().OnEvent(e)
