@@ -7,9 +7,11 @@ import (
 )
 
 type Application struct {
-	Name string
+	Name        string
+	WindowProps *WindowProperties
 
 	layerStack layer.Stack
+	window     Window
 
 	// Signals whether the application should close. Setting this to false
 	// terminates the game loop next frame.
@@ -17,15 +19,17 @@ type Application struct {
 }
 
 func (app *Application) run() {
-	app.running = true
+	app.window = CreateWindow(app.WindowProps, app.OnEvent)
+	defer app.window.Terminate()
 
+	app.running = true
 	for app.running {
+		app.window.OnUpdate()
+
 		// Update all layers
 		for it := app.layerStack.Bottom(); it.Next(); {
 			it.Get().OnUpdate()
 		}
-
-		app.running = false
 	}
 }
 
@@ -40,6 +44,13 @@ func (app *Application) PushOverlay(l layer.Layer) {
 func (app *Application) OnEvent(e event.Event) {
 	log.DebugCore(e.String())
 
+	// When getting a WindowClose event, signal the app to stop running.
+	if _, ok := e.(event.WindowClose); ok {
+		app.running = false
+		return
+	}
+
+	// Otherwise, pass the event down the layerstack until it is handled.
 	for it := app.layerStack.Top(); it.Prev(); {
 		it.Get().OnEvent(e)
 
