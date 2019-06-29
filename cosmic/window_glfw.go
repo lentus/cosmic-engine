@@ -23,7 +23,7 @@ func newGlfwWindow(props *WindowProperties) *glfwWindow {
 
 	var err error
 	if err = glfw.Init(); err != nil {
-		log.Panicf("Failed to initialise GLFW - %s", err.Error())
+		log.PanicfCore("Failed to initialise GLFW - %s", err.Error())
 	}
 
 	if window.vsync {
@@ -35,7 +35,7 @@ func newGlfwWindow(props *WindowProperties) *glfwWindow {
 	window.glfwWindow, err = glfw.CreateWindow(props.Width, props.Height, props.Title, nil, nil)
 	if err != nil {
 		glfw.Terminate()
-		log.Panicf("Failed to create GLFW window - %s", err.Error())
+		log.PanicfCore("Failed to create GLFW window - %s", err.Error())
 	}
 
 	window.setCallbacks()
