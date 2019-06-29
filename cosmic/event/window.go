@@ -89,5 +89,5 @@ func (e WindowMoved) Category() Category {
 }
 
 func (e WindowMoved) String() string {
-	return "WindowMovedEvent"
+	return fmt.Sprintf("WindowMovedEvent [x=%f, y=%f]", e.X, e.Y)
 }

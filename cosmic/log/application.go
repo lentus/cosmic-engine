@@ -5,7 +5,7 @@ func Debug(msg string) {
 }
 
 func Debugf(format string, args ...interface{}) {
-	appLog.Debugf(format, args)
+	appLog.Debugf(format, args...)
 }
 
 func Info(msg string) {
@@ -13,7 +13,7 @@ func Info(msg string) {
 }
 
 func Infof(format string, args ...interface{}) {
-	appLog.Infof(format, args)
+	appLog.Infof(format, args...)
 }
 
 func Notice(msg string) {
@@ -21,7 +21,7 @@ func Notice(msg string) {
 }
 
 func Noticef(format string, args ...interface{}) {
-	appLog.Noticef(format, args)
+	appLog.Noticef(format, args...)
 }
 
 func Warn(msg string) {
@@ -29,7 +29,7 @@ func Warn(msg string) {
 }
 
 func Warnf(format string, args ...interface{}) {
-	appLog.Warningf(format, args)
+	appLog.Warningf(format, args...)
 }
 
 func Error(msg string) {
@@ -37,7 +37,7 @@ func Error(msg string) {
 }
 
 func Errorf(format string, args ...interface{}) {
-	appLog.Errorf(format, args)
+	appLog.Errorf(format, args...)
 }
 
 func Critical(msg string) {
@@ -45,7 +45,7 @@ func Critical(msg string) {
 }
 
 func Criticalf(format string, args ...interface{}) {
-	appLog.Criticalf(format, args)
+	appLog.Criticalf(format, args...)
 }
 
 func Panic(msg string) {
@@ -53,5 +53,5 @@ func Panic(msg string) {
 }
 
 func Panicf(format string, args ...interface{}) {
-	appLog.Panicf(format, args)
+	appLog.Panicf(format, args...)
 }

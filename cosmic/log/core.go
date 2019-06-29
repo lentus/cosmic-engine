@@ -5,7 +5,7 @@ func DebugCore(msg string) {
 }
 
 func DebugfCore(format string, args ...interface{}) {
-	coreLog.Debugf(format, args)
+	coreLog.Debugf(format, args...)
 }
 
 func InfoCore(msg string) {
@@ -13,7 +13,7 @@ func InfoCore(msg string) {
 }
 
 func InfofCore(format string, args ...interface{}) {
-	coreLog.Infof(format, args)
+	coreLog.Infof(format, args...)
 }
 
 func NoticeCore(msg string) {
@@ -21,7 +21,7 @@ func NoticeCore(msg string) {
 }
 
 func NoticefCore(format string, args ...interface{}) {
-	coreLog.Noticef(format, args)
+	coreLog.Noticef(format, args...)
 }
 
 func WarnCore(msg string) {
@@ -29,7 +29,7 @@ func WarnCore(msg string) {
 }
 
 func WarnfCore(format string, args ...interface{}) {
-	coreLog.Warningf(format, args)
+	coreLog.Warningf(format, args...)
 }
 
 func ErrorCore(msg string) {
@@ -37,7 +37,7 @@ func ErrorCore(msg string) {
 }
 
 func ErrorfCore(format string, args ...interface{}) {
-	coreLog.Errorf(format, args)
+	coreLog.Errorf(format, args...)
 }
 
 func CriticalCore(msg string) {
@@ -45,7 +45,7 @@ func CriticalCore(msg string) {
 }
 
 func CriticalfCore(format string, args ...interface{}) {
-	coreLog.Criticalf(format, args)
+	coreLog.Criticalf(format, args...)
 }
 
 func PanicCore(msg string) {
@@ -53,5 +53,5 @@ func PanicCore(msg string) {
 }
 
 func PanicfCore(format string, args ...interface{}) {
-	coreLog.Panicf(format, args)
+	coreLog.Panicf(format, args...)
 }
