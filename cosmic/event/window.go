@@ -72,9 +72,12 @@ func (e WindowLostFocus) String() string {
 	return "WindowLostFocusEvent"
 }
 
-// Signals that a window lost focus
+// Signals that a window was moved
 type WindowMoved struct {
 	baseEvent
+
+	X float32
+	Y float32
 }
 
 func (e WindowMoved) Type() Type {

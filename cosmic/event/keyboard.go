@@ -11,15 +11,12 @@ func (e keyEvent) Category() Category {
 	return CategoryInput & CategoryKey
 }
 
-func (e keyEvent) string(action string, keyCode int) string {
-	return fmt.Sprintf("Key%sEvent [keycode=%d]", action, keyCode)
-}
-
 // Signals that a certain key was pressed
 type KeyPressed struct {
 	keyEvent
 
-	KeyCode int
+	KeyCode     int
+	RepeatCount int
 }
 
 func (e KeyPressed) Type() Type {
@@ -27,7 +24,7 @@ func (e KeyPressed) Type() Type {
 }
 
 func (e KeyPressed) String() string {
-	return e.string("Pressed", e.KeyCode)
+	return fmt.Sprintf("KeyPressedEvent [keycode=%d, repeatCount=%d]", e.KeyCode, e.RepeatCount)
 }
 
 // Signals that a certain key was released
@@ -42,14 +39,14 @@ func (e KeyReleased) Type() Type {
 }
 
 func (e KeyReleased) String() string {
-	return e.string("Released", e.KeyCode)
+	return fmt.Sprintf("KeyReleasedEvent [keycode=%d]", e.KeyCode)
 }
 
 // Signals that a certain key was typed (pressed and released quickly)
 type KeyTyped struct {
 	keyEvent
 
-	KeyCode int
+	Char rune
 }
 
 func (e KeyTyped) Type() Type {
@@ -57,5 +54,5 @@ func (e KeyTyped) Type() Type {
 }
 
 func (e KeyTyped) String() string {
-	return e.string("Typed", e.KeyCode)
+	return fmt.Sprintf("KeyTypedEvent [keycode=%c]", e.Char)
 }

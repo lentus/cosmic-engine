@@ -8,11 +8,11 @@ import (
 type Level int
 
 const (
-	DebugLevel Level = iota
-	InfoLevel
-	NoticeLevel
-	WarnLevel
-	ErrorLevel
+	LevelDebug Level = iota
+	LevelInfo
+	LevelNotice
+	LevelWarn
+	LevelError
 )
 
 var logFormat = logging.MustStringFormatter(
@@ -34,13 +34,13 @@ func Init(appLevel, coreLevel Level) {
 	// Init core logger
 	coreLog = logging.MustGetLogger(coreLogName)
 	switch coreLevel {
-	case DebugLevel:
+	case LevelDebug:
 		logging.SetLevel(logging.DEBUG, coreLogName)
-	case NoticeLevel:
+	case LevelNotice:
 		logging.SetLevel(logging.NOTICE, coreLogName)
-	case WarnLevel:
+	case LevelWarn:
 		logging.SetLevel(logging.WARNING, coreLogName)
-	case ErrorLevel:
+	case LevelError:
 		logging.SetLevel(logging.ERROR, coreLogName)
 	default:
 		logging.SetLevel(logging.INFO, coreLogName)
@@ -49,13 +49,13 @@ func Init(appLevel, coreLevel Level) {
 	// Init app logger
 	appLog = logging.MustGetLogger(appLogName)
 	switch appLevel {
-	case DebugLevel:
+	case LevelDebug:
 		logging.SetLevel(logging.DEBUG, appLogName)
-	case NoticeLevel:
+	case LevelNotice:
 		logging.SetLevel(logging.NOTICE, appLogName)
-	case WarnLevel:
+	case LevelWarn:
 		logging.SetLevel(logging.WARNING, appLogName)
-	case ErrorLevel:
+	case LevelError:
 		logging.SetLevel(logging.ERROR, appLogName)
 	default:
 		logging.SetLevel(logging.INFO, appLogName)
