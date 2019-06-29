@@ -6,18 +6,20 @@ import (
 )
 
 const (
-	WindowApiGlfw WindowApi = iota
+	WindowApiGlfw WindowApi = "GLFW"
 )
 
 func CreateWindow(props *WindowProperties, eventCallback func(e event.Event)) (window Window) {
+	log.DebugfCore("Creating %s window", props.Api)
+
 	switch props.Api {
 	case WindowApiGlfw:
 		window = newGlfwWindow(props)
 	default:
-		log.Panicf("Invalid window API value %d, make sure this API is available on your platform", props.Api)
+		log.PanicfCore("Invalid window API value %s, make sure this API is available on your platform", props.Api)
 	}
 
-	window.SetEventCallback(eventCallback)
+	window.setEventCallback(eventCallback)
 
 	return
 }
