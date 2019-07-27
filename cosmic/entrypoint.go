@@ -3,6 +3,7 @@ package cosmic
 import (
 	"github.com/lentus/cosmic-engine/cosmic/log"
 	"runtime"
+	"sync"
 )
 
 func init() {
@@ -10,14 +11,22 @@ func init() {
 	runtime.LockOSThread()
 }
 
+// Certain systems of cosmic assume that only one instance of Application is
+// created and active while running (an instance of) the engine. Instances of
+// Application are thus created as a singleton.
+var App *Application
+var once sync.Once
+
 func CreateAndRun(applicationFactory func() *Application, logLevelApp log.Level, logLevelCore log.Level) {
-	log.Init(logLevelApp, logLevelCore)
+	once.Do(func() {
+		log.Init(logLevelApp, logLevelCore)
 
-	log.DebugCore("Creating application with given factory")
+		log.DebugCore("Creating application with given factory")
 
-	// Build application with given factory
-	app := applicationFactory()
+		// Build application with given factory
+		App = applicationFactory()
 
-	log.DebugfCore("Starting application %s", app.Name)
-	app.run()
+		log.DebugfCore("Starting application %s", App.Name)
+		App.run()
+	})
 }

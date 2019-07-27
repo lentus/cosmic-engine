@@ -2,6 +2,7 @@ package cosmic
 
 import (
 	"github.com/lentus/cosmic-engine/cosmic/event"
+	"github.com/lentus/cosmic-engine/cosmic/input"
 	"github.com/lentus/cosmic-engine/cosmic/layer"
 	"github.com/lentus/cosmic-engine/cosmic/log"
 )
@@ -58,4 +59,20 @@ func (app *Application) OnEvent(e event.Event) {
 			break
 		}
 	}
+}
+
+func (app *Application) GetNativeWindow() interface{} {
+	return app.window.GetNativeWindow()
+}
+
+// Provides a way to query whether a key is being pressed without having to
+// keep state in the application.
+func IsKeyPressed(key input.Key) bool {
+	return input.IsKeyPressed(key, App.GetNativeWindow())
+}
+
+// Provides a way to query whether a mouse button is being pressed without
+// having to keep state in the application.
+func IsMouseButtonPressed(mouseButton input.MouseButton) bool {
+	return input.IsMouseButtonPressed(mouseButton, App.GetNativeWindow())
 }

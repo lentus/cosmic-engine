@@ -14,6 +14,7 @@ type Window interface {
 	GetHeight() int
 	IsVSync() bool
 	SetVSync(vsync bool)
+	GetNativeWindow() interface{}
 
 	setEventCallback(func(e event.Event))
 }

@@ -1,6 +1,9 @@
 package event
 
-import "fmt"
+import (
+	"fmt"
+	"github.com/lentus/cosmic-engine/cosmic/input"
+)
 
 // Signals mouse movement
 type MouseMoved struct {
@@ -49,7 +52,7 @@ func (e mouseButton) Category() Category {
 	return CategoryInput | CategoryMouse | CategoryMouseButton
 }
 
-func (e mouseButton) string(action string, button int) string {
+func (e mouseButton) string(action string, button input.MouseButton) string {
 	return fmt.Sprintf("MouseButton%sEvent [button=%d]", action, button)
 }
 
@@ -57,7 +60,7 @@ func (e mouseButton) string(action string, button int) string {
 type MouseButtonPressed struct {
 	mouseButton
 
-	Button int
+	Button input.MouseButton
 }
 
 func (e MouseButtonPressed) Type() Type {
@@ -72,7 +75,7 @@ func (e MouseButtonPressed) String() string {
 type MouseButtonReleased struct {
 	mouseButton
 
-	Button int
+	Button input.MouseButton
 }
 
 func (e MouseButtonReleased) Type() Type {

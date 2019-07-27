@@ -1,6 +1,9 @@
 package event
 
-import "fmt"
+import (
+	"fmt"
+	"github.com/lentus/cosmic-engine/cosmic/input"
+)
 
 // Provides common behaviour for key events
 type keyEvent struct {
@@ -15,7 +18,7 @@ func (e keyEvent) Category() Category {
 type KeyPressed struct {
 	keyEvent
 
-	KeyCode     int
+	Key         input.Key
 	RepeatCount int
 }
 
@@ -24,14 +27,14 @@ func (e KeyPressed) Type() Type {
 }
 
 func (e KeyPressed) String() string {
-	return fmt.Sprintf("KeyPressedEvent [keycode=%d, repeatCount=%d]", e.KeyCode, e.RepeatCount)
+	return fmt.Sprintf("KeyPressedEvent [keycode=%d, repeatCount=%d]", e.Key, e.RepeatCount)
 }
 
 // Signals that a certain key was released
 type KeyReleased struct {
 	keyEvent
 
-	KeyCode int
+	Key input.Key
 }
 
 func (e KeyReleased) Type() Type {
@@ -39,7 +42,7 @@ func (e KeyReleased) Type() Type {
 }
 
 func (e KeyReleased) String() string {
-	return fmt.Sprintf("KeyReleasedEvent [keycode=%d]", e.KeyCode)
+	return fmt.Sprintf("KeyReleasedEvent [keycode=%d]", e.Key)
 }
 
 // Signals that a certain key was typed (pressed and released quickly)
