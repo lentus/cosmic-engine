@@ -6,7 +6,7 @@ import (
 
 type WindowApi string
 
-type Window interface {
+type window interface {
 	OnUpdate()
 	Terminate()
 
@@ -16,7 +16,7 @@ type Window interface {
 	SetVSync(vsync bool)
 	GetNativeWindow() interface{}
 
-	setEventCallback(func(e event.Event))
+	SetEventCallback(func(e event.Event))
 }
 
 type WindowProperties struct {

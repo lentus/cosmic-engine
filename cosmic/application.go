@@ -3,6 +3,7 @@ package cosmic
 import (
 	"github.com/lentus/cosmic-engine/cosmic/event"
 	"github.com/lentus/cosmic-engine/cosmic/input"
+	"github.com/lentus/cosmic-engine/cosmic/internal/glfw"
 	"github.com/lentus/cosmic-engine/cosmic/layer"
 	"github.com/lentus/cosmic-engine/cosmic/log"
 )
@@ -12,7 +13,7 @@ type Application struct {
 	WindowProps *WindowProperties
 
 	layerStack layer.Stack
-	window     Window
+	window     window
 
 	// Signals whether the application should close. Setting this to false
 	// terminates the game loop next frame.
@@ -20,7 +21,7 @@ type Application struct {
 }
 
 func (app *Application) run() {
-	app.window = CreateWindow(app.WindowProps, app.OnEvent)
+	app.window = createWindow(app.WindowProps, app.OnEvent)
 	defer app.window.Terminate()
 
 	app.running = true
@@ -68,11 +69,11 @@ func (app *Application) GetNativeWindow() interface{} {
 // Provides a way to query whether a key is being pressed without having to
 // keep state in the application.
 func IsKeyPressed(key input.Key) bool {
-	return input.IsKeyPressed(key, App.GetNativeWindow())
+	return glfw.IsKeyPressed(key, App.GetNativeWindow())
 }
 
 // Provides a way to query whether a mouse button is being pressed without
 // having to keep state in the application.
 func IsMouseButtonPressed(mouseButton input.MouseButton) bool {
-	return input.IsMouseButtonPressed(mouseButton, App.GetNativeWindow())
+	return glfw.IsMouseButtonPressed(mouseButton, App.GetNativeWindow())
 }

@@ -1,9 +1,8 @@
-package cosmic
+package glfw
 
 import (
 	"github.com/go-gl/glfw/v3.2/glfw"
 	"github.com/lentus/cosmic-engine/cosmic/event"
-	"github.com/lentus/cosmic-engine/cosmic/input"
 	"github.com/lentus/cosmic-engine/cosmic/log"
 )
 
@@ -16,9 +15,9 @@ type glfwWindow struct {
 	eventCallback func(e event.Event)
 }
 
-func newGlfwWindow(props *WindowProperties) *glfwWindow {
+func NewGlfwWindow(title string, width, height int) *glfwWindow {
 	window := &glfwWindow{
-		title: props.Title,
+		title: title,
 		vsync: true,
 	}
 
@@ -33,7 +32,7 @@ func newGlfwWindow(props *WindowProperties) *glfwWindow {
 		glfw.WindowHint(glfw.RefreshRate, glfw.False)
 	}
 
-	window.nativeWindow, err = glfw.CreateWindow(props.Width, props.Height, props.Title, nil, nil)
+	window.nativeWindow, err = glfw.CreateWindow(width, height, title, nil, nil)
 	if err != nil {
 		glfw.Terminate()
 		log.PanicfCore("Failed to create GLFW window - %s", err.Error())
@@ -71,11 +70,11 @@ func (w *glfwWindow) setCallbacks() {
 
 		switch action {
 		case glfw.Press:
-			e = event.KeyPressed{Key: input.FromNativeKey[key]}
+			e = event.KeyPressed{Key: FromNativeKey[key]}
 		case glfw.Release:
-			e = event.KeyReleased{Key: input.FromNativeKey[key]}
+			e = event.KeyReleased{Key: FromNativeKey[key]}
 		default: // glfw.Repeat
-			e = event.KeyPressed{Key: input.FromNativeKey[key], RepeatCount: 1}
+			e = event.KeyPressed{Key: FromNativeKey[key], RepeatCount: 1}
 		}
 
 		w.eventCallback(e)
@@ -88,9 +87,9 @@ func (w *glfwWindow) setCallbacks() {
 	w.nativeWindow.SetMouseButtonCallback(func(window *glfw.Window, button glfw.MouseButton, action glfw.Action, mod glfw.ModifierKey) {
 		switch action {
 		case glfw.Press:
-			w.eventCallback(event.MouseButtonPressed{Button: input.FromNativeMouseButton[button]})
+			w.eventCallback(event.MouseButtonPressed{Button: FromNativeMouseButton[button]})
 		default: // glfw.Release
-			w.eventCallback(event.MouseButtonReleased{Button: input.FromNativeMouseButton[button]})
+			w.eventCallback(event.MouseButtonReleased{Button: FromNativeMouseButton[button]})
 		}
 	})
 
@@ -118,7 +117,7 @@ func (w *glfwWindow) GetHeight() int {
 	return height
 }
 
-func (w *glfwWindow) setEventCallback(callback func(e event.Event)) {
+func (w *glfwWindow) SetEventCallback(callback func(e event.Event)) {
 	w.eventCallback = callback
 }
 
