@@ -20,8 +20,16 @@ type Application struct {
 	running bool
 }
 
+func (app *Application) PushLayer(l layer.Layer) {
+	app.layerStack.Push(l)
+}
+
+func (app *Application) PushOverlay(l layer.Layer) {
+	app.layerStack.PushOverlay(l)
+}
+
 func (app *Application) run() {
-	app.window = createWindow(app.WindowProps, app.OnEvent)
+	app.window = createWindow(app.WindowProps, app.onEvent)
 	defer app.window.Terminate()
 
 	app.running = true
@@ -35,15 +43,7 @@ func (app *Application) run() {
 	}
 }
 
-func (app *Application) PushLayer(l layer.Layer) {
-	app.layerStack.Push(l)
-}
-
-func (app *Application) PushOverlay(l layer.Layer) {
-	app.layerStack.PushOverlay(l)
-}
-
-func (app *Application) OnEvent(e event.Event) {
+func (app *Application) onEvent(e event.Event) {
 	log.DebugCore(e.String())
 
 	// When getting a WindowClose event, signal the app to stop running.
@@ -62,18 +62,18 @@ func (app *Application) OnEvent(e event.Event) {
 	}
 }
 
-func (app *Application) GetNativeWindow() interface{} {
+func (app *Application) getNativeWindow() interface{} {
 	return app.window.GetNativeWindow()
 }
 
 // Provides a way to query whether a key is being pressed without having to
 // keep state in the application.
 func IsKeyPressed(key input.Key) bool {
-	return glfw.IsKeyPressed(key, App.GetNativeWindow())
+	return glfw.IsKeyPressed(key, App.getNativeWindow())
 }
 
 // Provides a way to query whether a mouse button is being pressed without
 // having to keep state in the application.
 func IsMouseButtonPressed(mouseButton input.MouseButton) bool {
-	return glfw.IsMouseButtonPressed(mouseButton, App.GetNativeWindow())
+	return glfw.IsMouseButtonPressed(mouseButton, App.getNativeWindow())
 }
