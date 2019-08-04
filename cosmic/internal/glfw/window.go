@@ -1,13 +1,16 @@
 package glfw
 
 import (
-	"github.com/go-gl/glfw/v3.2/glfw"
 	"github.com/lentus/cosmic-engine/cosmic/event"
+	"github.com/lentus/cosmic-engine/cosmic/graphics"
+	"github.com/lentus/cosmic-engine/cosmic/internal/vulkan"
 	"github.com/lentus/cosmic-engine/cosmic/log"
+	"github.com/vulkan-go/glfw/v3.3/glfw"
 )
 
 // glfwWindow provides a cross-platform window implementation using glfw.
 type glfwWindow struct {
+	context      graphics.Context
 	nativeWindow *glfw.Window
 	title        string
 	vsync        bool
@@ -15,7 +18,7 @@ type glfwWindow struct {
 	eventCallback func(e event.Event)
 }
 
-func NewGlfwWindow(title string, width, height int) *glfwWindow {
+func NewWindow(title string, width, height int) *glfwWindow {
 	window := &glfwWindow{
 		title: title,
 		vsync: true,
@@ -39,7 +42,7 @@ func NewGlfwWindow(title string, width, height int) *glfwWindow {
 	}
 
 	window.setCallbacks()
-	window.nativeWindow.MakeContextCurrent()
+	window.context = vulkan.NewContext(window.nativeWindow)
 
 	return window
 }
@@ -103,7 +106,7 @@ func (w *glfwWindow) setCallbacks() {
 }
 
 func (w *glfwWindow) OnUpdate() {
-	w.nativeWindow.SwapBuffers()
+	w.context.SwapBuffers()
 	glfw.PollEvents()
 }
 
@@ -134,6 +137,8 @@ func (w *glfwWindow) GetNativeWindow() interface{} {
 }
 
 func (w *glfwWindow) Terminate() {
+	w.context.Terminate()
+
 	log.DebugCore("Terminating GLFW window")
 	glfw.Terminate()
 }

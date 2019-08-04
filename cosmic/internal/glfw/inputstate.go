@@ -1,8 +1,8 @@
 package glfw
 
 import (
-	"github.com/go-gl/glfw/v3.2/glfw"
 	"github.com/lentus/cosmic-engine/cosmic/input"
+	"github.com/vulkan-go/glfw/v3.3/glfw"
 )
 
 // Provides a way to query whether a key is being pressed without having to

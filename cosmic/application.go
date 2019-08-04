@@ -44,7 +44,9 @@ func (app *Application) run() {
 }
 
 func (app *Application) onEvent(e event.Event) {
-	log.DebugCore(e.String())
+	if !event.IsInCategory(e, event.CategoryInput) {
+		log.DebugCore(e.String())
+	}
 
 	// When getting a WindowClose event, signal the app to stop running.
 	if _, ok := e.(event.WindowClose); ok {

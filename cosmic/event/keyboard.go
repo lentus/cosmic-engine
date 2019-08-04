@@ -11,7 +11,7 @@ type keyEvent struct {
 }
 
 func (e keyEvent) Category() Category {
-	return CategoryInput & CategoryKey
+	return CategoryInput | CategoryKey
 }
 
 // Signals that a certain key was pressed

@@ -16,7 +16,7 @@ func createWindow(props *WindowProperties, eventCallback func(e event.Event)) (w
 
 	switch props.Api {
 	case WindowApiGlfw:
-		window = glfw.NewGlfwWindow(props.Title, props.Width, props.Height)
+		window = glfw.NewWindow(props.Title, props.Width, props.Height)
 	case WindowApiDxgi:
 		log.PanicfCore("DirectX window API is not implemented yet")
 	default:
