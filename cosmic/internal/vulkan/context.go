@@ -7,16 +7,27 @@ import (
 )
 
 type Context struct {
-	nativeWindow        *glfw.Window
+	nativeWindow *glfw.Window
+
 	instance            vulkan.Instance
 	gpu                 vulkan.PhysicalDevice
 	device              vulkan.Device
 	graphicsFamilyIndex uint32
+
+	availableInstanceLayers   []vulkan.LayerProperties
+	enabledInstanceLayers     []string
+	enabledInstanceExtensions []string
+
+	debugCallback vulkan.DebugReportCallback
 }
 
 func NewContext(nativeWindow *glfw.Window) *Context {
 	log.InfoCore("Creating Vulkan graphics context")
-	ctx := Context{nativeWindow: nativeWindow}
+	ctx := Context{
+		nativeWindow:              nativeWindow,
+		enabledInstanceLayers:     make([]string, 0),
+		enabledInstanceExtensions: make([]string, 0),
+	}
 	ctx.nativeWindow.MakeContextCurrent()
 
 	vulkan.SetGetInstanceProcAddr(glfw.GetVulkanGetInstanceProcAddress())
@@ -24,14 +35,11 @@ func NewContext(nativeWindow *glfw.Window) *Context {
 		log.PanicfCore("failed to initialise Vulkan, %s", err.Error())
 	}
 
+	ctx.setupDebug()
 	ctx.createVulkanInstance()
+	ctx.initDebug()
 	ctx.selectGpu()
 	ctx.findGraphicsQueueFamily()
-
-	// Setup debugging
-	ctx.getInstanceLayers()
-	ctx.getDeviceLayers()
-
 	ctx.createDevice()
 
 	return &ctx
@@ -44,6 +52,7 @@ func (ctx *Context) SwapBuffers() {
 func (ctx *Context) Terminate() {
 	log.DebugCore("Terminating Vulkan graphics context")
 	vulkan.DestroyDevice(ctx.device, nil)
+	ctx.deInitDebug()
 	vulkan.DestroyInstance(ctx.instance, nil)
 }
 
@@ -59,8 +68,12 @@ func (ctx *Context) createVulkanInstance() {
 	}
 
 	instanceCreateInfo := vulkan.InstanceCreateInfo{
-		SType:            vulkan.StructureTypeInstanceCreateInfo,
-		PApplicationInfo: &applicationInfo,
+		SType:                   vulkan.StructureTypeInstanceCreateInfo,
+		PApplicationInfo:        &applicationInfo,
+		EnabledLayerCount:       uint32(len(ctx.enabledInstanceLayers)),
+		PpEnabledLayerNames:     ctx.enabledInstanceLayers,
+		EnabledExtensionCount:   uint32(len(ctx.enabledInstanceExtensions)),
+		PpEnabledExtensionNames: ctx.enabledInstanceExtensions,
 	}
 
 	var instance vulkan.Instance
@@ -68,7 +81,9 @@ func (ctx *Context) createVulkanInstance() {
 	panicOnError(result, "create Vulkan instance")
 
 	ctx.instance = instance
-	//vulkan.InitInstance(ctx.instance)
+	if err := vulkan.InitInstance(ctx.instance); err != nil {
+		log.PanicfCore("failed to initialise Vulkan instance (%s)", err.Error())
+	}
 }
 
 func (ctx *Context) selectGpu() {
@@ -148,32 +163,4 @@ func (ctx *Context) createDevice() {
 	panicOnError(result, "create device instance")
 
 	ctx.device = device
-}
-
-func (ctx *Context) getInstanceLayers() {
-	var layerCount uint32
-	vulkan.EnumerateInstanceLayerProperties(&layerCount, nil)
-	layerPropertiesList := make([]vulkan.LayerProperties, layerCount)
-	result := vulkan.EnumerateInstanceLayerProperties(&layerCount, layerPropertiesList)
-	panicOnError(result, "retrieve instance layers")
-
-	log.DebugfCore("Instance layers (%d):", len(layerPropertiesList))
-	for _, props := range layerPropertiesList {
-		props.Deref()
-		log.DebugfCore("\t%s [%s]", props.LayerName, props.Description)
-	}
-}
-
-func (ctx *Context) getDeviceLayers() {
-	var layerCount uint32
-	vulkan.EnumerateDeviceLayerProperties(ctx.gpu, &layerCount, nil)
-	layerPropertiesList := make([]vulkan.LayerProperties, layerCount)
-	result := vulkan.EnumerateDeviceLayerProperties(ctx.gpu, &layerCount, layerPropertiesList)
-	panicOnError(result, "retrieve device layers")
-
-	log.DebugfCore("Device layers (%d):", len(layerPropertiesList))
-	for _, props := range layerPropertiesList {
-		props.Deref()
-		log.DebugfCore("\t%s [%s]", props.LayerName, props.Description)
-	}
 }
