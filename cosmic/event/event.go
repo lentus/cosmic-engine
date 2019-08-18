@@ -30,7 +30,7 @@ const (
 type Category int
 
 const (
-	None                Category = 0
+	CategoryNone        Category = 0
 	CategoryApplication          = 1 << 0
 	CategoryWindow               = 1 << 1
 	CategoryInput                = 1 << 2
@@ -56,10 +56,10 @@ type baseEvent struct {
 	handled bool
 }
 
-func (e baseEvent) IsHandled() bool {
+func (e *baseEvent) IsHandled() bool {
 	return e.handled
 }
 
-func (e baseEvent) SetHandled() {
+func (e *baseEvent) SetHandled() {
 	e.handled = true
 }

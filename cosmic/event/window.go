@@ -4,7 +4,7 @@ import "fmt"
 
 // Signals that a window should close
 type WindowClose struct {
-	baseEvent
+	*baseEvent
 }
 
 func (e WindowClose) Type() Type {
@@ -21,7 +21,7 @@ func (e WindowClose) String() string {
 
 // Signals that a window was resized
 type WindowResize struct {
-	baseEvent
+	*baseEvent
 
 	Width, Height int
 }
@@ -40,7 +40,7 @@ func (e WindowResize) String() string {
 
 // Signals that a window gained focus
 type WindowFocus struct {
-	baseEvent
+	*baseEvent
 }
 
 func (e WindowFocus) Type() Type {
@@ -57,7 +57,7 @@ func (e WindowFocus) String() string {
 
 // Signals that a window lost focus
 type WindowLostFocus struct {
-	baseEvent
+	*baseEvent
 }
 
 func (e WindowLostFocus) Type() Type {
@@ -74,7 +74,7 @@ func (e WindowLostFocus) String() string {
 
 // Signals that a window was moved
 type WindowMoved struct {
-	baseEvent
+	*baseEvent
 
 	X float32
 	Y float32

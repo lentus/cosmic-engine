@@ -1,7 +1,7 @@
 package event
 
 type AppTick struct {
-	baseEvent
+	*baseEvent
 }
 
 func (e AppTick) Type() Type {
@@ -17,7 +17,7 @@ func (e AppTick) String() string {
 }
 
 type AppUpdate struct {
-	baseEvent
+	*baseEvent
 }
 
 func (e AppUpdate) Type() Type {
@@ -33,7 +33,7 @@ func (e AppUpdate) String() string {
 }
 
 type AppRender struct {
-	baseEvent
+	*baseEvent
 }
 
 func (e AppRender) Type() Type {

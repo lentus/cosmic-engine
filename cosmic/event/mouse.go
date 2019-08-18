@@ -7,7 +7,7 @@ import (
 
 // Signals mouse movement
 type MouseMoved struct {
-	baseEvent
+	*baseEvent
 
 	X, Y float32
 }
@@ -26,7 +26,7 @@ func (e MouseMoved) String() string {
 
 // Signals that the mouse wheel was scrolled
 type MouseScrolled struct {
-	baseEvent
+	*baseEvent
 
 	OffsetX, OffsetY float32
 }
@@ -45,7 +45,7 @@ func (e MouseScrolled) String() string {
 
 // Provides common behaviour for mouse button events
 type mouseButton struct {
-	baseEvent
+	*baseEvent
 }
 
 func (e mouseButton) Category() Category {

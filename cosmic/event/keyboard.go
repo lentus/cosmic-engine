@@ -7,7 +7,7 @@ import (
 
 // Provides common behaviour for key events
 type keyEvent struct {
-	baseEvent
+	*baseEvent
 }
 
 func (e keyEvent) Category() Category {
