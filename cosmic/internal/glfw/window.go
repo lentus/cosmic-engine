@@ -49,22 +49,22 @@ func NewWindow(title string, width, height int) *glfwWindow {
 
 func (w *glfwWindow) setCallbacks() {
 	w.nativeWindow.SetCloseCallback(func(window *glfw.Window) {
-		w.eventCallback(event.WindowClose{})
+		w.eventCallback(&event.WindowClose{})
 	})
 
 	w.nativeWindow.SetSizeCallback(func(window *glfw.Window, width int, height int) {
-		w.eventCallback(event.WindowResize{Width: width, Height: height})
+		w.eventCallback(&event.WindowResize{Width: width, Height: height})
 	})
 
 	w.nativeWindow.SetPosCallback(func(window *glfw.Window, xpos int, ypos int) {
-		w.eventCallback(event.WindowMoved{X: float32(xpos), Y: float32(ypos)})
+		w.eventCallback(&event.WindowMoved{X: float32(xpos), Y: float32(ypos)})
 	})
 
 	w.nativeWindow.SetFocusCallback(func(window *glfw.Window, focused bool) {
 		if focused {
-			w.eventCallback(event.WindowFocus{})
+			w.eventCallback(&event.WindowFocus{})
 		} else {
-			w.eventCallback(event.WindowLostFocus{})
+			w.eventCallback(&event.WindowLostFocus{})
 		}
 	})
 
@@ -73,35 +73,35 @@ func (w *glfwWindow) setCallbacks() {
 
 		switch action {
 		case glfw.Press:
-			e = event.KeyPressed{Key: FromNativeKey[key]}
+			e = &event.KeyPressed{Key: FromNativeKey[key]}
 		case glfw.Release:
-			e = event.KeyReleased{Key: FromNativeKey[key]}
+			e = &event.KeyReleased{Key: FromNativeKey[key]}
 		default: // glfw.Repeat
-			e = event.KeyPressed{Key: FromNativeKey[key], RepeatCount: 1}
+			e = &event.KeyPressed{Key: FromNativeKey[key], RepeatCount: 1}
 		}
 
 		w.eventCallback(e)
 	})
 
 	w.nativeWindow.SetCharCallback(func(window *glfw.Window, char rune) {
-		w.eventCallback(event.KeyTyped{Char: char})
+		w.eventCallback(&event.KeyTyped{Char: char})
 	})
 
 	w.nativeWindow.SetMouseButtonCallback(func(window *glfw.Window, button glfw.MouseButton, action glfw.Action, mod glfw.ModifierKey) {
 		switch action {
 		case glfw.Press:
-			w.eventCallback(event.MouseButtonPressed{Button: FromNativeMouseButton[button]})
+			w.eventCallback(&event.MouseButtonPressed{Button: FromNativeMouseButton[button]})
 		default: // glfw.Release
-			w.eventCallback(event.MouseButtonReleased{Button: FromNativeMouseButton[button]})
+			w.eventCallback(&event.MouseButtonReleased{Button: FromNativeMouseButton[button]})
 		}
 	})
 
 	w.nativeWindow.SetScrollCallback(func(window *glfw.Window, xoff float64, yoff float64) {
-		w.eventCallback(event.MouseScrolled{OffsetX: float32(xoff), OffsetY: float32(yoff)})
+		w.eventCallback(&event.MouseScrolled{OffsetX: float32(xoff), OffsetY: float32(yoff)})
 	})
 
 	w.nativeWindow.SetCursorPosCallback(func(window *glfw.Window, xpos float64, ypos float64) {
-		w.eventCallback(event.MouseMoved{X: float32(xpos), Y: float32(ypos)})
+		w.eventCallback(&event.MouseMoved{X: float32(xpos), Y: float32(ypos)})
 	})
 }
 

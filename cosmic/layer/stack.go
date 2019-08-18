@@ -35,17 +35,10 @@ func (ls *Stack) PopOverlay() (popped Layer) {
 // Bottom provides a new StackItem which can be used to iterate from the bottom
 // of the Stack.
 func (ls *Stack) Bottom() *StackItem {
-	if len(ls.layers) > 0 {
+	if len(ls.layers) > 0 || len(ls.overlays) > 0 {
 		return &StackItem{
 			stack: ls,
-			index: -1,
-		}
-	}
-
-	if len(ls.overlays) > 0 {
-		return &StackItem{
-			stack: ls,
-			index: len(ls.layers) - 1,
+			index: 0,
 		}
 	}
 
@@ -58,14 +51,14 @@ func (ls *Stack) Top() *StackItem {
 	if len(ls.overlays) > 0 {
 		return &StackItem{
 			stack: ls,
-			index: len(ls.layers) + len(ls.overlays),
+			index: len(ls.layers) + len(ls.overlays) - 1,
 		}
 	}
 
 	if len(ls.layers) > 0 {
 		return &StackItem{
 			stack: ls,
-			index: len(ls.layers),
+			index: len(ls.layers) - 1,
 		}
 	}
 

@@ -1,49 +1,49 @@
 package event
 
 type AppTick struct {
-	*baseEvent
+	baseEvent
 }
 
-func (e AppTick) Type() Type {
+func (e *AppTick) Type() Type {
 	return TypeAppTick
 }
 
-func (e AppTick) Category() Category {
+func (e *AppTick) Category() Category {
 	return CategoryApplication
 }
 
-func (e AppTick) String() string {
+func (e *AppTick) String() string {
 	return "AppTickEvent"
 }
 
 type AppUpdate struct {
-	*baseEvent
+	baseEvent
 }
 
-func (e AppUpdate) Type() Type {
+func (e *AppUpdate) Type() Type {
 	return TypeAppUpdate
 }
 
-func (e AppUpdate) Category() Category {
+func (e *AppUpdate) Category() Category {
 	return CategoryApplication
 }
 
-func (e AppUpdate) String() string {
+func (e *AppUpdate) String() string {
 	return "AppUpdateEvent"
 }
 
 type AppRender struct {
-	*baseEvent
+	baseEvent
 }
 
-func (e AppRender) Type() Type {
+func (e *AppRender) Type() Type {
 	return TypeAppRender
 }
 
-func (e AppRender) Category() Category {
+func (e *AppRender) Category() Category {
 	return CategoryApplication
 }
 
-func (e AppRender) String() string {
+func (e *AppRender) String() string {
 	return "AppRenderEvent"
 }

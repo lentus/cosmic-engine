@@ -49,7 +49,7 @@ func (app *Application) onEvent(e event.Event) {
 	}
 
 	// When getting a WindowClose event, signal the app to stop running.
-	if _, ok := e.(event.WindowClose); ok {
+	if _, ok := e.(*event.WindowClose); ok {
 		app.running = false
 		return
 	}

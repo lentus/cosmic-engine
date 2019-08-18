@@ -3,24 +3,24 @@ package event
 import "testing"
 
 type testEvent struct {
-	*baseEvent
+	baseEvent
 	category Category
 }
 
-func (te testEvent) Type() Type {
+func (te *testEvent) Type() Type {
 	return TypeAppRender
 }
 
-func (te testEvent) Category() Category {
+func (te *testEvent) Category() Category {
 	return te.category
 }
 
-func (te testEvent) String() string {
+func (te *testEvent) String() string {
 	return "TestEvent"
 }
 
 func TestIsInCategory(t *testing.T) {
-	e := testEvent{}
+	e := &testEvent{}
 
 	allExceptNone := []Category{
 		CategoryApplication,

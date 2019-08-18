@@ -7,10 +7,10 @@ import (
 
 // Provides common behaviour for key events
 type keyEvent struct {
-	*baseEvent
+	baseEvent
 }
 
-func (e keyEvent) Category() Category {
+func (e *keyEvent) Category() Category {
 	return CategoryInput | CategoryKey
 }
 
@@ -22,11 +22,11 @@ type KeyPressed struct {
 	RepeatCount int
 }
 
-func (e KeyPressed) Type() Type {
+func (e *KeyPressed) Type() Type {
 	return TypeKeyPressed
 }
 
-func (e KeyPressed) String() string {
+func (e *KeyPressed) String() string {
 	return fmt.Sprintf("KeyPressedEvent [keycode=%d, repeatCount=%d]", e.Key, e.RepeatCount)
 }
 
@@ -37,11 +37,11 @@ type KeyReleased struct {
 	Key input.Key
 }
 
-func (e KeyReleased) Type() Type {
+func (e *KeyReleased) Type() Type {
 	return TypeKeyReleased
 }
 
-func (e KeyReleased) String() string {
+func (e *KeyReleased) String() string {
 	return fmt.Sprintf("KeyReleasedEvent [keycode=%d]", e.Key)
 }
 
@@ -52,10 +52,10 @@ type KeyTyped struct {
 	Char rune
 }
 
-func (e KeyTyped) Type() Type {
+func (e *KeyTyped) Type() Type {
 	return TypeKeyTyped
 }
 
-func (e KeyTyped) String() string {
+func (e *KeyTyped) String() string {
 	return fmt.Sprintf("KeyTypedEvent [keycode=%c]", e.Char)
 }
