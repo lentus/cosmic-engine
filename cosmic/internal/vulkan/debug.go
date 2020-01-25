@@ -1,74 +1,22 @@
 package vulkan
 
 import (
-	"bytes"
 	"github.com/lentus/cosmic-engine/cosmic/log"
 	"github.com/vulkan-go/vulkan"
 	"unsafe"
 )
 
 func (ctx *Context) setupDebug() {
-	ctx.availableInstanceLayers = ctx.getInstanceLayers()
-
 	// Setup debug layers
-	ctx.enableIfAvailable("VK_LAYER_LUNARG_core_validation")
-	ctx.enableIfAvailable("VK_LAYER_LUNARG_parameter_validation")
-	ctx.enableIfAvailable("VK_LAYER_LUNARG_object_tracker")
-	ctx.enableIfAvailable("VK_LAYER_GOOGLE_threading")
-	ctx.enableIfAvailable("VK_LAYER_LUNARG_screenshot")
-	ctx.enableIfAvailable("VK_LAYER_LUNARG_monitor")
+	ctx.enableLayerIfAvailable("VK_LAYER_LUNARG_core_validation")
+	ctx.enableLayerIfAvailable("VK_LAYER_LUNARG_parameter_validation")
+	ctx.enableLayerIfAvailable("VK_LAYER_LUNARG_object_tracker")
+	ctx.enableLayerIfAvailable("VK_LAYER_GOOGLE_threading")
+	ctx.enableLayerIfAvailable("VK_LAYER_LUNARG_screenshot")
+	ctx.enableLayerIfAvailable("VK_LAYER_LUNARG_monitor")
 
 	// Setup debug error callback
 	ctx.enabledInstanceExtensions = append(ctx.enabledInstanceExtensions, safeStr(vulkan.ExtDebugReportExtensionName))
-}
-
-func (ctx *Context) enableIfAvailable(layerName string) {
-	for _, instanceLayer := range ctx.availableInstanceLayers {
-		instanceLayer.Deref()
-
-		instanceLayerName := string(bytes.Trim(instanceLayer.LayerName[:], "\x00"))
-		if instanceLayerName == layerName {
-			log.DebugfCore("Enabling instance layer %s", instanceLayer.LayerName)
-			ctx.enabledInstanceLayers = append(ctx.enabledInstanceLayers, string(instanceLayer.LayerName[:]))
-			return
-		}
-	}
-
-	log.WarnfCore("Cannot enable instance layer %s (not available)", layerName)
-}
-
-func (ctx *Context) getInstanceLayers() []vulkan.LayerProperties {
-	var layerCount uint32
-	vulkan.EnumerateInstanceLayerProperties(&layerCount, nil)
-	layerPropertiesList := make([]vulkan.LayerProperties, layerCount)
-	result := vulkan.EnumerateInstanceLayerProperties(&layerCount, layerPropertiesList)
-	panicOnError(result, "retrieve instance layers")
-
-	log.DebugfCore("Instance layers (%d):", len(layerPropertiesList))
-	for _, props := range layerPropertiesList {
-		props.Deref()
-		log.DebugfCore("\t%s [%s]", props.LayerName, props.Description)
-	}
-
-	return layerPropertiesList
-}
-
-func (ctx *Context) getDeviceLayers() []vulkan.LayerProperties {
-	var layerCount uint32
-	vulkan.EnumerateDeviceLayerProperties(ctx.gpu, &layerCount, nil)
-	layerPropertiesList := make([]vulkan.LayerProperties, layerCount)
-	result := vulkan.EnumerateDeviceLayerProperties(ctx.gpu, &layerCount, layerPropertiesList)
-	panicOnError(result, "retrieve device layers")
-
-	log.DebugfCore("Device layers (%d):", len(layerPropertiesList))
-	for _, props := range layerPropertiesList {
-		props.Deref()
-		log.DebugfCore("\t%s [%s]", props.LayerName, props.Description)
-	}
-
-	log.WarnCore("Device layers are deprecated since vulkan 1.0.13, and not supported by Cosmic")
-
-	return layerPropertiesList
 }
 
 var debugBit = vulkan.DebugReportFlags(vulkan.DebugReportDebugBit)
@@ -104,10 +52,11 @@ func vulkanDebugReportCallback(
 }
 
 func (ctx *Context) initDebug() {
-	reportFlagBits := vulkan.DebugReportInformationBit |
+	reportFlagBits :=
+		//vulkan.DebugReportInformationBit |
 		vulkan.DebugReportWarningBit |
-		vulkan.DebugReportErrorBit |
-		vulkan.DebugReportPerformanceWarningBit
+			vulkan.DebugReportErrorBit |
+			vulkan.DebugReportPerformanceWarningBit
 
 	createInfo := vulkan.DebugReportCallbackCreateInfo{
 		SType:       vulkan.StructureTypeDebugReportCallbackCreateInfo,

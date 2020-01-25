@@ -7,22 +7,31 @@ import (
 )
 
 type Context struct {
-	nativeWindow *glfw.Window
+	nativeWindow        *glfw.Window
+	surface             vulkan.Surface
+	surfaceFormat       vulkan.SurfaceFormat
+	surfaceCapabilities vulkan.SurfaceCapabilities
 
 	instance            vulkan.Instance
 	gpu                 vulkan.PhysicalDevice
 	device              vulkan.Device
 	graphicsFamilyIndex uint32
 
-	availableInstanceLayers   []vulkan.LayerProperties
-	enabledInstanceLayers     []string
-	enabledInstanceExtensions []string
+	availableInstanceLayers     []vulkan.LayerProperties
+	enabledInstanceLayers       []string
+	availableInstanceExtensions []vulkan.ExtensionProperties
+	enabledInstanceExtensions   []string
 
 	debugCallback vulkan.DebugReportCallback
 }
 
 func NewContext(nativeWindow *glfw.Window) *Context {
 	log.InfoCore("Creating Vulkan graphics context")
+
+	if !glfw.VulkanSupported() {
+		log.PanicCore("glfw reports that Vulkan is not supported, aborting")
+	}
+
 	ctx := Context{
 		nativeWindow:              nativeWindow,
 		enabledInstanceLayers:     make([]string, 0),
@@ -35,12 +44,16 @@ func NewContext(nativeWindow *glfw.Window) *Context {
 		log.PanicfCore("failed to initialise Vulkan, %s", err.Error())
 	}
 
+	ctx.availableInstanceLayers = ctx.getInstanceLayers()
+	ctx.availableInstanceExtensions = ctx.getInstanceExtensions()
+
 	ctx.setupDebug()
 	ctx.createVulkanInstance()
 	ctx.initDebug()
 	ctx.selectGpu()
 	ctx.findGraphicsQueueFamily()
 	ctx.createDevice()
+	ctx.createWindowSurface()
 
 	return &ctx
 }
@@ -59,11 +72,13 @@ func (ctx *Context) Terminate() {
 func (ctx *Context) createVulkanInstance() {
 	log.DebugCore("Creating Vulkan instance")
 
+	ctx.setupLayersAndExtensions()
+
 	// TODO get version info and application name from somewhere
 	applicationInfo := vulkan.ApplicationInfo{
 		SType:         vulkan.StructureTypeApplicationInfo,
 		ApiVersion:    vulkan.MakeVersion(1, 1, 88),
-		PEngineName:   "Cosmic Engine\x00",
+		PEngineName:   safeStr("Cosmic Engine"),
 		EngineVersion: vulkan.MakeVersion(0, 1, 0),
 	}
 
@@ -163,4 +178,51 @@ func (ctx *Context) createDevice() {
 	panicOnError(result, "create device instance")
 
 	ctx.device = device
+}
+
+func (ctx *Context) createWindowSurface() {
+	surfacePtr, err := ctx.nativeWindow.CreateWindowSurface(ctx.instance, nil)
+	if err != nil {
+		log.PanicfCore("failed to create vulkan window surface, %s", err.Error())
+	}
+	ctx.surface = vulkan.SurfaceFromPointer(surfacePtr)
+
+	var wsiSupported vulkan.Bool32
+	result := vulkan.GetPhysicalDeviceSurfaceSupport(ctx.gpu, ctx.graphicsFamilyIndex, ctx.surface, &wsiSupported)
+	panicOnError(result, "check whether WSI is supported")
+
+	if wsiSupported == vulkan.False {
+		log.PanicCore("the GLFW surface does not support WSI")
+	}
+
+	surfaceCapabilities := vulkan.SurfaceCapabilities{}
+	result = vulkan.GetPhysicalDeviceSurfaceCapabilities(ctx.gpu, ctx.surface, &surfaceCapabilities)
+	panicOnError(result, "get surface capabilities")
+
+	surfaceCapabilities.Deref()
+	surfaceCapabilities.CurrentExtent.Deref()
+	surfaceCapabilities.MinImageExtent.Deref()
+	surfaceCapabilities.MaxImageExtent.Deref()
+	ctx.surfaceCapabilities = surfaceCapabilities
+
+	var formatCount uint32
+	result = vulkan.GetPhysicalDeviceSurfaceFormats(ctx.gpu, ctx.surface, &formatCount, nil)
+	panicOnError(result, "get physical device format count")
+	if formatCount == 0 {
+		log.PanicCore("no surface format found")
+	}
+
+	surfaceFormats := make([]vulkan.SurfaceFormat, formatCount)
+	vulkan.GetPhysicalDeviceSurfaceFormats(ctx.gpu, ctx.surface, &formatCount, surfaceFormats)
+	for i := range surfaceFormats {
+		surfaceFormats[i].Deref()
+	}
+
+	if surfaceFormats[0].Format == vulkan.FormatUndefined {
+		ctx.surfaceFormat.Format = vulkan.FormatB8g8r8a8Unorm
+		ctx.surfaceFormat.ColorSpace = vulkan.ColorSpaceSrgbNonlinear
+	} else {
+		ctx.surfaceFormat = surfaceFormats[0]
+	}
+
 }
