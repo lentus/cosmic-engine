@@ -18,7 +18,7 @@ type glfwWindow struct {
 	eventCallback func(e event.Event)
 }
 
-func NewWindow(title string, width, height int) *glfwWindow {
+func NewWindow(title string, width, height int, graphicsProps graphics.ContextProperties) *glfwWindow {
 	window := &glfwWindow{
 		title: title,
 		vsync: true,
@@ -42,7 +42,7 @@ func NewWindow(title string, width, height int) *glfwWindow {
 	}
 
 	window.setCallbacks()
-	window.context = vulkan.NewContext(window.nativeWindow)
+	window.context = vulkan.NewContext(window.nativeWindow, graphicsProps.BufferingType)
 
 	return window
 }

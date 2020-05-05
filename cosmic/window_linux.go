@@ -15,7 +15,7 @@ func createWindow(props *WindowProperties, eventCallback func(e event.Event)) (w
 
 	switch props.Api {
 	case WindowApiGlfw:
-		window = glfw.NewWindow(props.Title, props.Width, props.Height)
+		window = glfw.NewWindow(props.Title, props.Width, props.Height, props.graphicsProperties)
 	default:
 		log.PanicfCore("Invalid window API value %s, make sure this API is available on your platform", props.Api)
 	}

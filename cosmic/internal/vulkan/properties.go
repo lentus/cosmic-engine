@@ -6,7 +6,10 @@ import (
 	"github.com/vulkan-go/vulkan"
 )
 
-func (ctx *Context) setupLayersAndExtensions() {
+func (ctx *Context) setupInstanceLayersAndExtensions() {
+	ctx.availableInstanceLayers = getInstanceLayers()
+	ctx.availableInstanceExtensions = getInstanceExtensions()
+
 	requiredExtensions := ctx.nativeWindow.GetRequiredInstanceExtensions()
 
 	log.DebugCore("Extensions required by GLFW:")
@@ -17,7 +20,7 @@ func (ctx *Context) setupLayersAndExtensions() {
 	ctx.enabledInstanceExtensions = append(ctx.enabledInstanceExtensions, requiredExtensions...)
 }
 
-func (ctx *Context) getInstanceExtensions() []vulkan.ExtensionProperties {
+func getInstanceExtensions() []vulkan.ExtensionProperties {
 	var extensionCount uint32
 	vulkan.EnumerateInstanceExtensionProperties(safeStr(""), &extensionCount, nil)
 	extensionPropertiesList := make([]vulkan.ExtensionProperties, extensionCount)
@@ -48,7 +51,7 @@ func (ctx *Context) enableLayerIfAvailable(layerName string) {
 	log.WarnfCore("Cannot enable instance layer %s (not available)", layerName)
 }
 
-func (ctx *Context) getInstanceLayers() []vulkan.LayerProperties {
+func getInstanceLayers() []vulkan.LayerProperties {
 	var layerCount uint32
 	vulkan.EnumerateInstanceLayerProperties(&layerCount, nil)
 	layerPropertiesList := make([]vulkan.LayerProperties, layerCount)
@@ -62,4 +65,35 @@ func (ctx *Context) getInstanceLayers() []vulkan.LayerProperties {
 	}
 
 	return layerPropertiesList
+}
+
+func (ctx *Context) setupDeviceExtensions() {
+	ctx.availableDeviceExtensions = getDeviceExtensions(ctx)
+
+	requiredExtensions := []string{
+		safeStr(vulkan.KhrSwapchainExtensionName),
+	}
+
+	log.DebugCore("Required device extensions:")
+	for _, extension := range requiredExtensions {
+		log.DebugfCore("\t%s", extension)
+	}
+
+	ctx.enabledDeviceExtensions = append(ctx.enabledDeviceExtensions, requiredExtensions...)
+}
+
+func getDeviceExtensions(ctx *Context) []vulkan.ExtensionProperties {
+	var extensionCount uint32
+	vulkan.EnumerateDeviceExtensionProperties(ctx.gpu, "", &extensionCount, nil)
+	extensionProperties := make([]vulkan.ExtensionProperties, extensionCount)
+	result := vulkan.EnumerateDeviceExtensionProperties(ctx.gpu, "", &extensionCount, extensionProperties)
+	panicOnError(result, "retrieve device extensions")
+
+	log.DebugfCore("Device extensions (%d):", len(extensionProperties))
+	for _, props := range extensionProperties {
+		props.Deref()
+		log.DebugfCore("\t%s", props.ExtensionName)
+	}
+
+	return extensionProperties
 }

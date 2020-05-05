@@ -51,7 +51,7 @@ func vulkanDebugReportCallback(
 	return vulkan.False
 }
 
-func (ctx *Context) initDebug() {
+func (ctx *Context) initDebugCallback() {
 	reportFlagBits :=
 		//vulkan.DebugReportInformationBit |
 		vulkan.DebugReportWarningBit |
@@ -67,8 +67,4 @@ func (ctx *Context) initDebug() {
 	var debugCallback vulkan.DebugReportCallback
 	vulkan.CreateDebugReportCallback(ctx.instance, &createInfo, nil, &debugCallback)
 	ctx.debugCallback = debugCallback
-}
-
-func (ctx *Context) deInitDebug() {
-	vulkan.DestroyDebugReportCallback(ctx.instance, ctx.debugCallback, nil)
 }

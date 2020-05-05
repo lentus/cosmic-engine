@@ -1,31 +1,37 @@
 package vulkan
 
 import (
+	"github.com/lentus/cosmic-engine/cosmic/graphics"
 	"github.com/lentus/cosmic-engine/cosmic/log"
 	"github.com/vulkan-go/glfw/v3.3/glfw"
 	"github.com/vulkan-go/vulkan"
 )
 
 type Context struct {
-	nativeWindow        *glfw.Window
-	surface             vulkan.Surface
-	surfaceFormat       vulkan.SurfaceFormat
-	surfaceCapabilities vulkan.SurfaceCapabilities
+	nativeWindow *glfw.Window
 
 	instance            vulkan.Instance
 	gpu                 vulkan.PhysicalDevice
 	device              vulkan.Device
 	graphicsFamilyIndex uint32
 
+	surface             vulkan.Surface
+	surfaceFormat       vulkan.SurfaceFormat
+	surfaceCapabilities vulkan.SurfaceCapabilities
+	swapchain           vulkan.Swapchain
+	swapchainImageCount uint32
+
 	availableInstanceLayers     []vulkan.LayerProperties
-	enabledInstanceLayers       []string
 	availableInstanceExtensions []vulkan.ExtensionProperties
+	availableDeviceExtensions   []vulkan.ExtensionProperties
+	enabledInstanceLayers       []string
 	enabledInstanceExtensions   []string
+	enabledDeviceExtensions     []string
 
 	debugCallback vulkan.DebugReportCallback
 }
 
-func NewContext(nativeWindow *glfw.Window) *Context {
+func NewContext(nativeWindow *glfw.Window, bufferingType graphics.ImageBuffering) *Context {
 	log.InfoCore("Creating Vulkan graphics context")
 
 	if !glfw.VulkanSupported() {
@@ -36,6 +42,8 @@ func NewContext(nativeWindow *glfw.Window) *Context {
 		nativeWindow:              nativeWindow,
 		enabledInstanceLayers:     make([]string, 0),
 		enabledInstanceExtensions: make([]string, 0),
+		enabledDeviceExtensions:   make([]string, 0),
+		swapchainImageCount:       uint32(bufferingType) + 2, // First buffering type DoubleBuffering has index 0
 	}
 	ctx.nativeWindow.MakeContextCurrent()
 
@@ -44,16 +52,14 @@ func NewContext(nativeWindow *glfw.Window) *Context {
 		log.PanicfCore("failed to initialise Vulkan, %s", err.Error())
 	}
 
-	ctx.availableInstanceLayers = ctx.getInstanceLayers()
-	ctx.availableInstanceExtensions = ctx.getInstanceExtensions()
-
 	ctx.setupDebug()
 	ctx.createVulkanInstance()
-	ctx.initDebug()
+	ctx.initDebugCallback()
 	ctx.selectGpu()
 	ctx.findGraphicsQueueFamily()
 	ctx.createDevice()
 	ctx.createWindowSurface()
+	ctx.createSwapchain()
 
 	return &ctx
 }
@@ -64,15 +70,17 @@ func (ctx *Context) SwapBuffers() {
 
 func (ctx *Context) Terminate() {
 	log.DebugCore("Terminating Vulkan graphics context")
+	vulkan.DestroySwapchain(ctx.device, ctx.swapchain, nil)
+	vulkan.DestroySurface(ctx.instance, ctx.surface, nil)
 	vulkan.DestroyDevice(ctx.device, nil)
-	ctx.deInitDebug()
+	vulkan.DestroyDebugReportCallback(ctx.instance, ctx.debugCallback, nil)
 	vulkan.DestroyInstance(ctx.instance, nil)
 }
 
 func (ctx *Context) createVulkanInstance() {
 	log.DebugCore("Creating Vulkan instance")
 
-	ctx.setupLayersAndExtensions()
+	ctx.setupInstanceLayersAndExtensions()
 
 	// TODO get version info and application name from somewhere
 	applicationInfo := vulkan.ApplicationInfo{
@@ -156,6 +164,8 @@ func (ctx *Context) findGraphicsQueueFamily() {
 func (ctx *Context) createDevice() {
 	log.DebugCore("Creating Vulkan device")
 
+	ctx.setupDeviceExtensions()
+
 	deviceQueueCreateInfo := vulkan.DeviceQueueCreateInfo{
 		SType:            vulkan.StructureTypeDeviceQueueCreateInfo,
 		QueueFamilyIndex: ctx.graphicsFamilyIndex,
@@ -168,9 +178,11 @@ func (ctx *Context) createDevice() {
 	}
 
 	deviceCreateInfo := vulkan.DeviceCreateInfo{
-		SType:                vulkan.StructureTypeDeviceCreateInfo,
-		QueueCreateInfoCount: 1,
-		PQueueCreateInfos:    queueCreateInfos,
+		SType:                   vulkan.StructureTypeDeviceCreateInfo,
+		QueueCreateInfoCount:    1,
+		PQueueCreateInfos:       queueCreateInfos,
+		EnabledExtensionCount:   uint32(len(ctx.enabledDeviceExtensions)),
+		PpEnabledExtensionNames: ctx.enabledDeviceExtensions,
 	}
 
 	var device vulkan.Device
@@ -181,6 +193,8 @@ func (ctx *Context) createDevice() {
 }
 
 func (ctx *Context) createWindowSurface() {
+	log.DebugCore("Creating window surface")
+
 	surfacePtr, err := ctx.nativeWindow.CreateWindowSurface(ctx.instance, nil)
 	if err != nil {
 		log.PanicfCore("failed to create vulkan window surface, %s", err.Error())
@@ -224,5 +238,78 @@ func (ctx *Context) createWindowSurface() {
 	} else {
 		ctx.surfaceFormat = surfaceFormats[0]
 	}
+}
 
+func (ctx *Context) createSwapchain() {
+	log.DebugCore("Creating Vulkan swapchain")
+
+	ctx.swapchainImageCount = determineImageCount(
+		ctx.swapchainImageCount, ctx.surfaceCapabilities.MinImageCount, ctx.surfaceCapabilities.MaxImageCount,
+	)
+
+	var swapchainImageExtent vulkan.Extent2D
+	if ctx.surfaceCapabilities.CurrentExtent.Width != vulkan.MaxUint32 {
+		swapchainImageExtent.Width = ctx.surfaceCapabilities.CurrentExtent.Width
+		swapchainImageExtent.Height = ctx.surfaceCapabilities.CurrentExtent.Height
+	} else {
+		width, height := ctx.nativeWindow.GetSize()
+		swapchainImageExtent.Width = uint32(width)
+		swapchainImageExtent.Height = uint32(height)
+	}
+
+	// Attempt to use Mailbox present mode if available, otherwise use FIFO
+	// THIS BEHAVIOUR ENABLES VSYNC BY DEFAULT! Use PresentModeImmediate to
+	// support disabled VSYNC.
+	presentMode := vulkan.PresentModeFifo
+
+	var presentModeCount uint32
+	result := vulkan.GetPhysicalDeviceSurfacePresentModes(ctx.gpu, ctx.surface, &presentModeCount, nil)
+	panicOnError(result, "retrieve supported present modes")
+	supportedPresentModes := make([]vulkan.PresentMode, presentModeCount)
+	result = vulkan.GetPhysicalDeviceSurfacePresentModes(ctx.gpu, ctx.surface, &presentModeCount, supportedPresentModes)
+	panicOnError(result, "retrieve supported present modes")
+
+	for _, supportedMode := range supportedPresentModes {
+		if supportedMode == vulkan.PresentModeMailbox {
+			presentMode = supportedMode
+		}
+	}
+
+	swapchainCreateInfo := vulkan.SwapchainCreateInfo{
+		SType:                 vulkan.StructureTypeSwapchainCreateInfo,
+		Surface:               ctx.surface,
+		MinImageCount:         ctx.swapchainImageCount,
+		ImageFormat:           ctx.surfaceFormat.Format,
+		ImageColorSpace:       ctx.surfaceFormat.ColorSpace,
+		ImageExtent:           swapchainImageExtent,
+		ImageArrayLayers:      1, // No stereoscopic rendering, which requires 2
+		ImageUsage:            vulkan.ImageUsageFlags(vulkan.ImageUsageColorAttachmentBit),
+		ImageSharingMode:      vulkan.SharingModeExclusive,
+		QueueFamilyIndexCount: 0,   // Ignored since sharing mode is exclusive
+		PQueueFamilyIndices:   nil, // Ignored since sharing mode is exclusive
+		PreTransform:          vulkan.SurfaceTransformIdentityBit,
+		CompositeAlpha:        vulkan.CompositeAlphaOpaqueBit,
+		PresentMode:           presentMode,
+		Clipped:               vulkan.True,
+		OldSwapchain:          nil,
+	}
+	var swapchain vulkan.Swapchain
+	result = vulkan.CreateSwapchain(ctx.device, &swapchainCreateInfo, nil, &swapchain)
+	panicOnError(result, "create swapchain")
+
+	ctx.swapchain = swapchain
+}
+
+func determineImageCount(requested, min, max uint32) uint32 {
+	if requested < min {
+		log.WarnfCore("Requested image count %d not supported by your system, min is %d", requested, min)
+		return min
+	}
+
+	if max > 0 && requested > max {
+		log.WarnfCore("Requested image count %d not supported by your system, max is %d", requested, max)
+		return max
+	}
+
+	return requested
 }
