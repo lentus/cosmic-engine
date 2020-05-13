@@ -1,6 +1,7 @@
 package vulkan
 
 import (
+	"fmt"
 	"github.com/lentus/cosmic-engine/cosmic/graphics"
 	"github.com/lentus/cosmic-engine/cosmic/log"
 	"github.com/vulkan-go/glfw/v3.3/glfw"
@@ -12,14 +13,25 @@ type Context struct {
 
 	instance            vulkan.Instance
 	gpu                 vulkan.PhysicalDevice
+	gpuProperties       vulkan.PhysicalDeviceProperties
+	gpuMemoryProperties vulkan.PhysicalDeviceMemoryProperties
 	device              vulkan.Device
 	graphicsFamilyIndex uint32
 
 	surface             vulkan.Surface
 	surfaceFormat       vulkan.SurfaceFormat
 	surfaceCapabilities vulkan.SurfaceCapabilities
+
 	swapchain           vulkan.Swapchain
 	swapchainImageCount uint32
+	swapchainImages     []vulkan.Image
+	swapchainImageViews []vulkan.ImageView
+
+	depthStencilFormat      vulkan.Format
+	depthStencilImage       vulkan.Image
+	depthStencilImageMemory vulkan.DeviceMemory
+	depthStencilImageView   vulkan.ImageView
+	stencilAvailable        bool
 
 	availableInstanceLayers     []vulkan.LayerProperties
 	availableInstanceExtensions []vulkan.ExtensionProperties
@@ -52,6 +64,7 @@ func NewContext(nativeWindow *glfw.Window, bufferingType graphics.ImageBuffering
 		log.PanicfCore("failed to initialise Vulkan, %s", err.Error())
 	}
 
+	ctx.setupInstanceLayersAndExtensions()
 	ctx.setupDebug()
 	ctx.createVulkanInstance()
 	ctx.initDebugCallback()
@@ -60,6 +73,8 @@ func NewContext(nativeWindow *glfw.Window, bufferingType graphics.ImageBuffering
 	ctx.createDevice()
 	ctx.createWindowSurface()
 	ctx.createSwapchain()
+	ctx.createSwapchainImages()
+	ctx.createDepthStencilImage()
 
 	return &ctx
 }
@@ -70,7 +85,9 @@ func (ctx *Context) SwapBuffers() {
 
 func (ctx *Context) Terminate() {
 	log.DebugCore("Terminating Vulkan graphics context")
-	vulkan.DestroySwapchain(ctx.device, ctx.swapchain, nil)
+	ctx.destroyDepthStencilImage()
+	ctx.destroySwapchainImageViews()
+	vulkan.DestroySwapchain(ctx.device, ctx.swapchain, nil) // Destroys swapchain images as well
 	vulkan.DestroySurface(ctx.instance, ctx.surface, nil)
 	vulkan.DestroyDevice(ctx.device, nil)
 	vulkan.DestroyDebugReportCallback(ctx.instance, ctx.debugCallback, nil)
@@ -79,8 +96,6 @@ func (ctx *Context) Terminate() {
 
 func (ctx *Context) createVulkanInstance() {
 	log.DebugCore("Creating Vulkan instance")
-
-	ctx.setupInstanceLayersAndExtensions()
 
 	// TODO get version info and application name from somewhere
 	applicationInfo := vulkan.ApplicationInfo{
@@ -138,6 +153,16 @@ func (ctx *Context) selectGpu() {
 
 	// Select a GPU TODO find best performing one
 	ctx.gpu = gpus[0]
+
+	var gpuProperties vulkan.PhysicalDeviceProperties
+	vulkan.GetPhysicalDeviceProperties(ctx.gpu, &gpuProperties)
+	gpuProperties.Deref()
+	ctx.gpuProperties = gpuProperties
+
+	var memoryProperties vulkan.PhysicalDeviceMemoryProperties
+	vulkan.GetPhysicalDeviceMemoryProperties(ctx.gpu, &memoryProperties)
+	memoryProperties.Deref()
+	ctx.gpuMemoryProperties = memoryProperties
 }
 
 func (ctx *Context) findGraphicsQueueFamily() {
@@ -298,6 +323,12 @@ func (ctx *Context) createSwapchain() {
 	panicOnError(result, "create swapchain")
 
 	ctx.swapchain = swapchain
+
+	var swapchainImageCount uint32
+	result = vulkan.GetSwapchainImages(ctx.device, ctx.swapchain, &swapchainImageCount, nil)
+	panicOnError(result, "retrieve swapchain image count")
+
+	ctx.swapchainImageCount = swapchainImageCount
 }
 
 func determineImageCount(requested, min, max uint32) uint32 {
@@ -312,4 +343,149 @@ func determineImageCount(requested, min, max uint32) uint32 {
 	}
 
 	return requested
+}
+
+func (ctx *Context) createSwapchainImages() {
+	log.DebugCore("Creating Vulkan swapchain images")
+	ctx.swapchainImages = make([]vulkan.Image, ctx.swapchainImageCount)
+	result := vulkan.GetSwapchainImages(ctx.device, ctx.swapchain, &ctx.swapchainImageCount, ctx.swapchainImages)
+	panicOnError(result, "create swapchain images")
+
+	ctx.swapchainImageViews = make([]vulkan.ImageView, ctx.swapchainImageCount)
+	for i := range ctx.swapchainImageViews {
+		imageViewCreateInfo := vulkan.ImageViewCreateInfo{
+			SType:      vulkan.StructureTypeImageViewCreateInfo,
+			Image:      ctx.swapchainImages[i],
+			ViewType:   vulkan.ImageViewType2d,
+			Format:     ctx.surfaceFormat.Format,
+			Components: vulkan.ComponentMapping{}, // Use identity mapping for rgba components
+			SubresourceRange: vulkan.ImageSubresourceRange{
+				AspectMask:     vulkan.ImageAspectFlags(vulkan.ImageAspectColorBit),
+				BaseMipLevel:   0,
+				LevelCount:     1,
+				BaseArrayLayer: 0,
+				LayerCount:     1,
+			},
+		}
+
+		var imageView vulkan.ImageView
+		result = vulkan.CreateImageView(ctx.device, &imageViewCreateInfo, nil, &imageView)
+		panicOnError(result, fmt.Sprintf("create swapchain image view nr %d", i))
+		ctx.swapchainImageViews[i] = imageView
+	}
+}
+
+func (ctx *Context) destroySwapchainImageViews() {
+	for _, imageView := range ctx.swapchainImageViews {
+		vulkan.DestroyImageView(ctx.device, imageView, nil)
+	}
+}
+
+func (ctx *Context) createDepthStencilImage() {
+	log.DebugCore("Creating Vulkan depth stencil image")
+
+	// Take the first supported format of the following formats
+	desiredFormats := []vulkan.Format{
+		vulkan.FormatD32SfloatS8Uint,
+		vulkan.FormatD24UnormS8Uint,
+		vulkan.FormatD16UnormS8Uint,
+		vulkan.FormatD32Sfloat,
+		vulkan.FormatD16Unorm,
+	}
+	for _, format := range desiredFormats {
+		var formatProps vulkan.FormatProperties
+		vulkan.GetPhysicalDeviceFormatProperties(ctx.gpu, format, &formatProps)
+		formatProps.Deref()
+
+		if formatProps.OptimalTilingFeatures&vulkan.FormatFeatureFlags(vulkan.FormatFeatureDepthStencilAttachmentBit) != 0 {
+			ctx.depthStencilFormat = format
+			break
+		}
+	}
+
+	if ctx.depthStencilFormat == vulkan.FormatUndefined {
+		log.PanicCore("None of the desired depth stencil formats are supported")
+	}
+
+	// Check whether stencil is available
+	ctx.stencilAvailable = ctx.depthStencilFormat == vulkan.FormatD32SfloatS8Uint ||
+		ctx.depthStencilFormat == vulkan.FormatD24UnormS8Uint ||
+		ctx.depthStencilFormat == vulkan.FormatD16UnormS8Uint ||
+		ctx.depthStencilFormat == vulkan.FormatD32Sfloat
+
+	imageCreateInfo := vulkan.ImageCreateInfo{
+		SType:     vulkan.StructureTypeImageCreateInfo,
+		Flags:     0,
+		ImageType: vulkan.ImageType2d,
+		Format:    ctx.depthStencilFormat,
+		Extent: vulkan.Extent3D{
+			Width:  ctx.surfaceCapabilities.CurrentExtent.Width,
+			Height: ctx.surfaceCapabilities.CurrentExtent.Height,
+			Depth:  1,
+		},
+		MipLevels:             1,
+		ArrayLayers:           1,
+		Samples:               vulkan.SampleCount1Bit,
+		Tiling:                vulkan.ImageTilingOptimal,
+		Usage:                 vulkan.ImageUsageFlags(vulkan.ImageUsageDepthStencilAttachmentBit),
+		SharingMode:           vulkan.SharingModeExclusive,
+		QueueFamilyIndexCount: 0,   // Ignored because of exclusive mode
+		PQueueFamilyIndices:   nil, // Ignored because of exclusive mode
+		InitialLayout:         vulkan.ImageLayoutUndefined,
+	}
+
+	var depthStencilImage vulkan.Image
+	result := vulkan.CreateImage(ctx.device, &imageCreateInfo, nil, &depthStencilImage)
+	panicOnError(result, "create depth stencil image")
+	ctx.depthStencilImage = depthStencilImage
+
+	var imageMemoryRequirements vulkan.MemoryRequirements
+	vulkan.GetImageMemoryRequirements(ctx.device, ctx.depthStencilImage, &imageMemoryRequirements)
+	imageMemoryRequirements.Deref()
+
+	memoryTypeIndex := ctx.findMemoryTypeIndex(&imageMemoryRequirements, vulkan.MemoryPropertyFlags(vulkan.MemoryPropertyDeviceLocalBit))
+	if memoryTypeIndex == vulkan.MaxUint32 {
+		log.PanicCore("Could not find memory type to allocate depth stencil image memory")
+	}
+
+	memoryAllocateInfo := vulkan.MemoryAllocateInfo{
+		SType:           vulkan.StructureTypeMemoryAllocateInfo,
+		AllocationSize:  imageMemoryRequirements.Size,
+		MemoryTypeIndex: memoryTypeIndex,
+	}
+	var depthStencilImageMemory vulkan.DeviceMemory
+	vulkan.AllocateMemory(ctx.device, &memoryAllocateInfo, nil, &depthStencilImageMemory)
+	ctx.depthStencilImageMemory = depthStencilImageMemory
+	vulkan.BindImageMemory(ctx.device, ctx.depthStencilImage, ctx.depthStencilImageMemory, 0)
+
+	aspectMask := vulkan.ImageAspectDepthBit
+	if ctx.stencilAvailable {
+		aspectMask |= vulkan.ImageAspectStencilBit
+	}
+
+	imageViewCreateInfo := vulkan.ImageViewCreateInfo{
+		SType:      vulkan.StructureTypeImageViewCreateInfo,
+		Image:      ctx.depthStencilImage,
+		ViewType:   vulkan.ImageViewType2d,
+		Format:     ctx.depthStencilFormat,
+		Components: vulkan.ComponentMapping{}, // Use identity mapping for rgba components
+		SubresourceRange: vulkan.ImageSubresourceRange{
+			AspectMask:     vulkan.ImageAspectFlags(aspectMask),
+			BaseMipLevel:   0,
+			LevelCount:     1,
+			BaseArrayLayer: 0,
+			LayerCount:     1,
+		},
+	}
+
+	var depthStencilImageView vulkan.ImageView
+	result = vulkan.CreateImageView(ctx.device, &imageViewCreateInfo, nil, &depthStencilImageView)
+	panicOnError(result, "create depth stencil image view")
+	ctx.depthStencilImageView = depthStencilImageView
+}
+
+func (ctx *Context) destroyDepthStencilImage() {
+	vulkan.DestroyImageView(ctx.device, ctx.depthStencilImageView, nil)
+	vulkan.FreeMemory(ctx.device, ctx.depthStencilImageMemory, nil)
+	vulkan.DestroyImage(ctx.device, ctx.depthStencilImage, nil)
 }
