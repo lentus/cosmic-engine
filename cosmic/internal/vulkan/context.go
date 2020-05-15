@@ -26,6 +26,9 @@ type Context struct {
 	swapchainImageCount uint32
 	swapchainImages     []vulkan.Image
 	swapchainImageViews []vulkan.ImageView
+	framebuffers        []vulkan.Framebuffer
+
+	renderPass vulkan.RenderPass
 
 	depthStencilFormat      vulkan.Format
 	depthStencilImage       vulkan.Image
@@ -75,6 +78,8 @@ func NewContext(nativeWindow *glfw.Window, bufferingType graphics.ImageBuffering
 	ctx.createSwapchain()
 	ctx.createSwapchainImages()
 	ctx.createDepthStencilImage()
+	ctx.createRenderPass()
+	ctx.createFramebuffers()
 
 	return &ctx
 }
@@ -85,6 +90,8 @@ func (ctx *Context) SwapBuffers() {
 
 func (ctx *Context) Terminate() {
 	log.DebugCore("Terminating Vulkan graphics context")
+	ctx.destroyFramebuffers()
+	vulkan.DestroyRenderPass(ctx.device, ctx.renderPass, nil)
 	ctx.destroyDepthStencilImage()
 	ctx.destroySwapchainImageViews()
 	vulkan.DestroySwapchain(ctx.device, ctx.swapchain, nil) // Destroys swapchain images as well
@@ -488,4 +495,94 @@ func (ctx *Context) destroyDepthStencilImage() {
 	vulkan.DestroyImageView(ctx.device, ctx.depthStencilImageView, nil)
 	vulkan.FreeMemory(ctx.device, ctx.depthStencilImageMemory, nil)
 	vulkan.DestroyImage(ctx.device, ctx.depthStencilImage, nil)
+}
+
+func (ctx *Context) createRenderPass() {
+	attachments := make([]vulkan.AttachmentDescription, 2)
+
+	// Depth attachment
+	attachments[0] = vulkan.AttachmentDescription{
+		Format:         ctx.depthStencilFormat,
+		Samples:        vulkan.SampleCount1Bit,
+		LoadOp:         vulkan.AttachmentLoadOpClear,
+		StoreOp:        vulkan.AttachmentStoreOpDontCare,
+		StencilLoadOp:  vulkan.AttachmentLoadOpDontCare,
+		StencilStoreOp: vulkan.AttachmentStoreOpStore,
+		InitialLayout:  vulkan.ImageLayoutUndefined,
+		FinalLayout:    vulkan.ImageLayoutDepthStencilAttachmentOptimal,
+	}
+	// Color attachment
+	attachments[1] = vulkan.AttachmentDescription{
+		Format:        ctx.surfaceFormat.Format,
+		Samples:       vulkan.SampleCount1Bit,
+		LoadOp:        vulkan.AttachmentLoadOpClear,
+		StoreOp:       vulkan.AttachmentStoreOpStore,
+		InitialLayout: vulkan.ImageLayoutUndefined,
+		FinalLayout:   vulkan.ImageLayoutPresentSrc,
+	}
+
+	depthStencilAttachment := vulkan.AttachmentReference{
+		Attachment: 0,
+		Layout:     vulkan.ImageLayoutDepthStencilAttachmentOptimal,
+	}
+	colorAttachments := make([]vulkan.AttachmentReference, 1)
+	colorAttachments[0] = vulkan.AttachmentReference{
+		Attachment: 1, // Reference to the color attachment index
+		Layout:     vulkan.ImageLayoutColorAttachmentOptimal,
+	}
+
+	subPasses := make([]vulkan.SubpassDescription, 1)
+	subPasses[0] = vulkan.SubpassDescription{
+		PipelineBindPoint:       vulkan.PipelineBindPointGraphics,
+		InputAttachmentCount:    0,   // No other sub passes to reference
+		PInputAttachments:       nil, // No other sub passes to reference
+		ColorAttachmentCount:    uint32(len(colorAttachments)),
+		PColorAttachments:       colorAttachments,
+		PDepthStencilAttachment: &depthStencilAttachment,
+	}
+
+	renderPassCreateInfo := vulkan.RenderPassCreateInfo{
+		SType:           vulkan.StructureTypeRenderPassCreateInfo,
+		AttachmentCount: uint32(len(attachments)),
+		PAttachments:    attachments,
+		SubpassCount:    uint32(len(subPasses)),
+		PSubpasses:      subPasses,
+		DependencyCount: 0,   // No dependencies between sub passes
+		PDependencies:   nil, // No dependencies between sub passes
+	}
+
+	var renderPass vulkan.RenderPass
+	result := vulkan.CreateRenderPass(ctx.device, &renderPassCreateInfo, nil, &renderPass)
+	panicOnError(result, "create render pass")
+	ctx.renderPass = renderPass
+}
+
+func (ctx *Context) createFramebuffers() {
+	ctx.framebuffers = make([]vulkan.Framebuffer, ctx.swapchainImageCount)
+
+	for i := uint32(0); i < ctx.swapchainImageCount; i++ {
+		attachments := make([]vulkan.ImageView, 2)
+		attachments[0] = ctx.depthStencilImageView
+		attachments[1] = ctx.swapchainImageViews[i]
+
+		framebufferCreateInfo := vulkan.FramebufferCreateInfo{
+			SType:           vulkan.StructureTypeFramebufferCreateInfo,
+			RenderPass:      ctx.renderPass,
+			AttachmentCount: uint32(len(attachments)),
+			PAttachments:    attachments,
+			Width:           ctx.surfaceCapabilities.CurrentExtent.Width,
+			Height:          ctx.surfaceCapabilities.CurrentExtent.Height,
+			Layers:          1,
+		}
+		var framebuffer vulkan.Framebuffer
+		result := vulkan.CreateFramebuffer(ctx.device, &framebufferCreateInfo, nil, &framebuffer)
+		panicOnError(result, "create framebuffer for swapchain image "+string(i))
+		ctx.framebuffers[i] = framebuffer
+	}
+}
+
+func (ctx *Context) destroyFramebuffers() {
+	for _, framebuffer := range ctx.framebuffers {
+		vulkan.DestroyFramebuffer(ctx.device, framebuffer, nil)
+	}
 }
