@@ -16,19 +16,23 @@ type Context struct {
 	gpuProperties       vulkan.PhysicalDeviceProperties
 	gpuMemoryProperties vulkan.PhysicalDeviceMemoryProperties
 	device              vulkan.Device
+	graphicsQueue       vulkan.Queue
 	graphicsFamilyIndex uint32
 
 	surface             vulkan.Surface
 	surfaceFormat       vulkan.SurfaceFormat
 	surfaceCapabilities vulkan.SurfaceCapabilities
 
-	swapchain           vulkan.Swapchain
-	swapchainImageCount uint32
-	swapchainImages     []vulkan.Image
-	swapchainImageViews []vulkan.ImageView
-	framebuffers        []vulkan.Framebuffer
+	swapchain                 vulkan.Swapchain
+	swapchainImageCount       uint32
+	swapchainImages           []vulkan.Image
+	swapchainImageViews       []vulkan.ImageView
+	activeSwapchainImageindex uint32
 
-	renderPass vulkan.RenderPass
+	swapchainImageAvailable vulkan.Fence
+
+	framebuffers []vulkan.Framebuffer
+	renderPass   vulkan.RenderPass
 
 	depthStencilFormat      vulkan.Format
 	depthStencilImage       vulkan.Image
@@ -44,6 +48,11 @@ type Context struct {
 	enabledDeviceExtensions     []string
 
 	debugCallback vulkan.DebugReportCallback
+
+	// These are only here for demo purposes so I can test the vulkan implementation
+	commandPool             vulkan.CommandPool
+	commandBuffer           vulkan.CommandBuffer
+	renderCompleteSemaphore vulkan.Semaphore
 }
 
 func NewContext(nativeWindow *glfw.Window, bufferingType graphics.ImageBuffering) *Context {
@@ -80,16 +89,24 @@ func NewContext(nativeWindow *glfw.Window, bufferingType graphics.ImageBuffering
 	ctx.createDepthStencilImage()
 	ctx.createRenderPass()
 	ctx.createFramebuffers()
+	ctx.createSynchronizations()
+
+	// These are only here so I can test the vulkan implementation
+	ctx.createCommandPool()
+	ctx.createCommandBuffer()
+	ctx.createRenderCompleteSemaphore()
 
 	return &ctx
 }
 
-func (ctx *Context) SwapBuffers() {
-	ctx.nativeWindow.SwapBuffers()
-}
-
 func (ctx *Context) Terminate() {
 	log.DebugCore("Terminating Vulkan graphics context")
+	vulkan.QueueWaitIdle(ctx.graphicsQueue) // Wait for the graphics queue to be idle
+
+	vulkan.DestroySemaphore(ctx.device, ctx.renderCompleteSemaphore, nil)
+	vulkan.DestroyCommandPool(ctx.device, ctx.commandPool, nil)
+
+	vulkan.DestroyFence(ctx.device, ctx.swapchainImageAvailable, nil)
 	ctx.destroyFramebuffers()
 	vulkan.DestroyRenderPass(ctx.device, ctx.renderPass, nil)
 	ctx.destroyDepthStencilImage()
@@ -220,8 +237,11 @@ func (ctx *Context) createDevice() {
 	var device vulkan.Device
 	result := vulkan.CreateDevice(ctx.gpu, &deviceCreateInfo, nil, &device)
 	panicOnError(result, "create device instance")
-
 	ctx.device = device
+
+	var graphicsQueue vulkan.Queue
+	vulkan.GetDeviceQueue(ctx.device, ctx.graphicsFamilyIndex, 0, &graphicsQueue)
+	ctx.graphicsQueue = graphicsQueue
 }
 
 func (ctx *Context) createWindowSurface() {
@@ -585,4 +605,142 @@ func (ctx *Context) destroyFramebuffers() {
 	for _, framebuffer := range ctx.framebuffers {
 		vulkan.DestroyFramebuffer(ctx.device, framebuffer, nil)
 	}
+}
+
+func (ctx *Context) createSynchronizations() {
+	fenceCreateInfo := vulkan.FenceCreateInfo{
+		SType: vulkan.StructureTypeFenceCreateInfo,
+	}
+
+	var swapchainImageAvailable vulkan.Fence
+	result := vulkan.CreateFence(ctx.device, &fenceCreateInfo, nil, &swapchainImageAvailable)
+	panicOnError(result, "create fence for swapchain image availability")
+	ctx.swapchainImageAvailable = swapchainImageAvailable
+}
+
+func (ctx *Context) getActiveFramebuffer() vulkan.Framebuffer {
+	return ctx.framebuffers[ctx.activeSwapchainImageindex]
+}
+
+func (ctx *Context) getSurfaceSize() vulkan.Extent2D {
+	return vulkan.Extent2D{
+		Width:  ctx.surfaceCapabilities.CurrentExtent.Width,
+		Height: ctx.surfaceCapabilities.CurrentExtent.Height,
+	}
+}
+
+func (ctx *Context) beginRender() {
+	var activeSwapchainImage uint32
+	result := vulkan.AcquireNextImage(ctx.device, ctx.swapchain, vulkan.MaxUint64, nil, ctx.swapchainImageAvailable, &activeSwapchainImage)
+	panicOnError(result, "retrieve active swapchain image index")
+	ctx.activeSwapchainImageindex = activeSwapchainImage
+
+	result = vulkan.WaitForFences(ctx.device, 1, []vulkan.Fence{ctx.swapchainImageAvailable}, vulkan.True, vulkan.MaxUint64)
+	panicOnError(result, "wait for swapchain image fence")
+
+	result = vulkan.ResetFences(ctx.device, 1, []vulkan.Fence{ctx.swapchainImageAvailable})
+	panicOnError(result, "reset swapchain image fence")
+
+	result = vulkan.QueueWaitIdle(ctx.graphicsQueue)
+	panicOnError(result, "wait for graphics queue to be idle")
+}
+
+func (ctx *Context) endRender(waitSemaphores []vulkan.Semaphore) {
+	presentInfo := vulkan.PresentInfo{
+		SType:              vulkan.StructureTypePresentInfo,
+		WaitSemaphoreCount: uint32(len(waitSemaphores)),
+		PWaitSemaphores:    waitSemaphores,
+		SwapchainCount:     1,
+		PSwapchains:        []vulkan.Swapchain{ctx.swapchain},
+		PImageIndices:      []uint32{ctx.activeSwapchainImageindex},
+	}
+	result := vulkan.QueuePresent(ctx.graphicsQueue, &presentInfo)
+	panicOnError(result, "issue queue operations (draw call)")
+}
+
+func (ctx *Context) createCommandPool() {
+	commandPoolCreateInfo := vulkan.CommandPoolCreateInfo{
+		SType:            vulkan.StructureTypeCommandPoolCreateInfo,
+		Flags:            vulkan.CommandPoolCreateFlags(vulkan.CommandPoolCreateTransientBit | vulkan.CommandPoolCreateResetCommandBufferBit),
+		QueueFamilyIndex: ctx.graphicsFamilyIndex,
+	}
+
+	var commandPool vulkan.CommandPool
+	result := vulkan.CreateCommandPool(ctx.device, &commandPoolCreateInfo, nil, &commandPool)
+	panicOnError(result, "create command pool")
+	ctx.commandPool = commandPool
+}
+
+func (ctx *Context) createCommandBuffer() {
+	commandBufferAllocateInfo := vulkan.CommandBufferAllocateInfo{
+		SType:              vulkan.StructureTypeCommandBufferAllocateInfo,
+		CommandPool:        ctx.commandPool,
+		Level:              vulkan.CommandBufferLevelPrimary,
+		CommandBufferCount: 1,
+	}
+
+	commandBuffers := make([]vulkan.CommandBuffer, 1)
+	result := vulkan.AllocateCommandBuffers(ctx.device, &commandBufferAllocateInfo, commandBuffers)
+	panicOnError(result, "allocate command buffer")
+	ctx.commandBuffer = commandBuffers[0]
+}
+
+func (ctx *Context) createRenderCompleteSemaphore() {
+	semaphoreCreateInfo := vulkan.SemaphoreCreateInfo{
+		SType: vulkan.StructureTypeSemaphoreCreateInfo,
+	}
+
+	var renderCompleteSemaphore vulkan.Semaphore
+	result := vulkan.CreateSemaphore(ctx.device, &semaphoreCreateInfo, nil, &renderCompleteSemaphore)
+	panicOnError(result, "create render complete semaphore")
+	ctx.renderCompleteSemaphore = renderCompleteSemaphore
+}
+
+func (ctx *Context) Render() {
+	ctx.beginRender()
+
+	commandBufferBeginInfo := vulkan.CommandBufferBeginInfo{
+		SType: vulkan.StructureTypeCommandBufferBeginInfo,
+		Flags: vulkan.CommandBufferUsageFlags(vulkan.CommandBufferUsageOneTimeSubmitBit),
+	}
+	vulkan.BeginCommandBuffer(ctx.commandBuffer, &commandBufferBeginInfo)
+
+	renderArea := vulkan.Rect2D{
+		Offset: vulkan.Offset2D{
+			X: 0,
+			Y: 0,
+		},
+		Extent: ctx.getSurfaceSize(),
+	}
+
+	clearValues := make([]vulkan.ClearValue, 2)
+	clearValues[0].SetDepthStencil(0.0, 0)
+	clearValues[1].SetColor([]float32{0.8, 0.2, 0.2, 1.0})
+
+	renderPassBeginInfo := vulkan.RenderPassBeginInfo{
+		SType:           vulkan.StructureTypeRenderPassBeginInfo,
+		RenderPass:      ctx.renderPass,
+		Framebuffer:     ctx.getActiveFramebuffer(),
+		RenderArea:      renderArea,
+		ClearValueCount: uint32(len(clearValues)),
+		PClearValues:    clearValues,
+	}
+	vulkan.CmdBeginRenderPass(ctx.commandBuffer, &renderPassBeginInfo, vulkan.SubpassContentsInline)
+	vulkan.CmdEndRenderPass(ctx.commandBuffer)
+
+	vulkan.EndCommandBuffer(ctx.commandBuffer)
+
+	submitInfo := vulkan.SubmitInfo{
+		SType:                vulkan.StructureTypeSubmitInfo,
+		WaitSemaphoreCount:   0,
+		PWaitSemaphores:      nil,
+		PWaitDstStageMask:    nil,
+		CommandBufferCount:   1,
+		PCommandBuffers:      []vulkan.CommandBuffer{ctx.commandBuffer},
+		SignalSemaphoreCount: 1,
+		PSignalSemaphores:    []vulkan.Semaphore{ctx.renderCompleteSemaphore},
+	}
+	vulkan.QueueSubmit(ctx.graphicsQueue, 1, []vulkan.SubmitInfo{submitInfo}, nil)
+
+	ctx.endRender([]vulkan.Semaphore{ctx.renderCompleteSemaphore})
 }

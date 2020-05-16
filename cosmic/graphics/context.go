@@ -12,6 +12,6 @@ type ContextProperties struct {
 }
 
 type Context interface {
-	SwapBuffers()
+	Render()
 	Terminate()
 }

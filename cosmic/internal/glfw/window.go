@@ -106,7 +106,7 @@ func (w *glfwWindow) setCallbacks() {
 }
 
 func (w *glfwWindow) OnUpdate() {
-	w.context.SwapBuffers()
+	w.context.Render()
 	glfw.PollEvents()
 }
 
