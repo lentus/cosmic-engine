@@ -13,7 +13,7 @@ type WindowProperties struct {
 	Height int
 	Api    WindowApi
 
-	graphicsProperties graphics.ContextProperties
+	GraphicsProperties graphics.ContextProperties
 }
 
 type window interface {

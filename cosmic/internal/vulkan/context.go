@@ -6,6 +6,7 @@ import (
 	"github.com/lentus/cosmic-engine/cosmic/log"
 	"github.com/vulkan-go/glfw/v3.3/glfw"
 	"github.com/vulkan-go/vulkan"
+	"unsafe"
 )
 
 type Context struct {
@@ -15,9 +16,11 @@ type Context struct {
 	gpu                 vulkan.PhysicalDevice
 	gpuProperties       vulkan.PhysicalDeviceProperties
 	gpuMemoryProperties vulkan.PhysicalDeviceMemoryProperties
+	gpuFeatures         vulkan.PhysicalDeviceFeatures
 	device              vulkan.Device
+	queueFamilies       queueFamilyIndices
 	graphicsQueue       vulkan.Queue
-	graphicsFamilyIndex uint32
+	presentQueue        vulkan.Queue
 
 	surface             vulkan.Surface
 	surfaceFormat       vulkan.SurfaceFormat
@@ -76,14 +79,14 @@ func NewContext(nativeWindow *glfw.Window, bufferingType graphics.ImageBuffering
 		log.PanicfCore("failed to initialise Vulkan, %s", err.Error())
 	}
 
-	ctx.setupInstanceLayersAndExtensions()
+	ctx.setupLayersAndExtensions()
 	ctx.setupDebug()
 	ctx.createVulkanInstance()
 	ctx.initDebugCallback()
-	ctx.selectGpu()
-	ctx.findGraphicsQueueFamily()
-	ctx.createDevice()
-	ctx.createWindowSurface()
+	ctx.createSurface()
+	ctx.selectPhysicalDevice()
+	ctx.createLogicalDevice()
+	ctx.initWindowSurface()
 	ctx.createSwapchain()
 	ctx.createSwapchainImages()
 	ctx.createDepthStencilImage()
@@ -129,8 +132,10 @@ func (ctx *Context) createVulkanInstance() {
 		EngineVersion: vulkan.MakeVersion(0, 1, 0),
 	}
 
+	debugReportCallbackCreateInfo := createDebugReportCallbackCreateInfo()
 	instanceCreateInfo := vulkan.InstanceCreateInfo{
 		SType:                   vulkan.StructureTypeInstanceCreateInfo,
+		PNext:                   unsafe.Pointer(&debugReportCallbackCreateInfo), // Enable debug callback for instance creation
 		PApplicationInfo:        &applicationInfo,
 		EnabledLayerCount:       uint32(len(ctx.enabledInstanceLayers)),
 		PpEnabledLayerNames:     ctx.enabledInstanceLayers,
@@ -148,87 +153,35 @@ func (ctx *Context) createVulkanInstance() {
 	}
 }
 
-func (ctx *Context) selectGpu() {
-	log.DebugCore("Selecting gpu")
-
-	var gpuCount uint32
-	vulkan.EnumeratePhysicalDevices(ctx.instance, &gpuCount, nil)
-	gpus := make([]vulkan.PhysicalDevice, gpuCount)
-	result := vulkan.EnumeratePhysicalDevices(ctx.instance, &gpuCount, gpus)
-	panicOnError(result, "retrieve gpu list")
-
-	log.DebugfCore("Found %d gpu(s)", len(gpus))
-	for _, gpu := range gpus {
-		var gpuProperties vulkan.PhysicalDeviceProperties
-		vulkan.GetPhysicalDeviceProperties(gpu, &gpuProperties)
-		gpuProperties.Deref()
-
-		var memoryProperties vulkan.PhysicalDeviceMemoryProperties
-		vulkan.GetPhysicalDeviceMemoryProperties(gpu, &memoryProperties)
-		memoryProperties.Deref()
-
-		log.DebugfCore("\tName           %s", string(gpuProperties.DeviceName[:]))
-		log.DebugfCore("\tID             %d", gpuProperties.DeviceID)
-		log.DebugfCore("\tType           %d", gpuProperties.DeviceType)
-		log.DebugfCore("\tAPI version    %d", gpuProperties.ApiVersion)
-		log.DebugfCore("\tVendor ID      %d", gpuProperties.VendorID)
-		log.DebugfCore("\tDriver version %d", gpuProperties.DriverVersion)
+func (ctx *Context) createSurface() {
+	surfacePtr, err := ctx.nativeWindow.CreateWindowSurface(ctx.instance, nil)
+	if err != nil {
+		log.PanicfCore("failed to create vulkan window surface, %s", err.Error())
 	}
-
-	// Select a GPU TODO find best performing one
-	ctx.gpu = gpus[0]
-
-	var gpuProperties vulkan.PhysicalDeviceProperties
-	vulkan.GetPhysicalDeviceProperties(ctx.gpu, &gpuProperties)
-	gpuProperties.Deref()
-	ctx.gpuProperties = gpuProperties
-
-	var memoryProperties vulkan.PhysicalDeviceMemoryProperties
-	vulkan.GetPhysicalDeviceMemoryProperties(ctx.gpu, &memoryProperties)
-	memoryProperties.Deref()
-	ctx.gpuMemoryProperties = memoryProperties
+	ctx.surface = vulkan.SurfaceFromPointer(surfacePtr)
 }
 
-func (ctx *Context) findGraphicsQueueFamily() {
-	var familyCount uint32
-	vulkan.GetPhysicalDeviceQueueFamilyProperties(ctx.gpu, &familyCount, nil)
-	queueFamiliePropertiesList := make([]vulkan.QueueFamilyProperties, familyCount)
-	vulkan.GetPhysicalDeviceQueueFamilyProperties(ctx.gpu, &familyCount, queueFamiliePropertiesList)
-
-	found := false
-	for i, properties := range queueFamiliePropertiesList {
-		properties.Deref()
-		if properties.QueueFlags&vulkan.QueueFlags(vulkan.QueueGraphicsBit) != 0 {
-			ctx.graphicsFamilyIndex = uint32(i)
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		log.PanicCore("Failed to find queue family supporting graphics on selected gpu")
-	}
-}
-
-func (ctx *Context) createDevice() {
+func (ctx *Context) createLogicalDevice() {
 	log.DebugCore("Creating Vulkan device")
 
-	ctx.setupDeviceExtensions()
-
-	deviceQueueCreateInfo := vulkan.DeviceQueueCreateInfo{
-		SType:            vulkan.StructureTypeDeviceQueueCreateInfo,
-		QueueFamilyIndex: ctx.graphicsFamilyIndex,
-		QueueCount:       1,
-		PQueuePriorities: []float32{1.0},
+	uniqueQueueFamilyIndices := []uint32{ctx.queueFamilies.graphicsIndex}
+	if ctx.queueFamilies.hasSeparatePresentQueue() {
+		uniqueQueueFamilyIndices = append(uniqueQueueFamilyIndices, ctx.queueFamilies.presentIndex)
 	}
 
-	queueCreateInfos := []vulkan.DeviceQueueCreateInfo{
-		deviceQueueCreateInfo,
+	var queueCreateInfos []vulkan.DeviceQueueCreateInfo
+	for _, queueFamilyIndex := range uniqueQueueFamilyIndices {
+		queueCreateInfos = append(queueCreateInfos, vulkan.DeviceQueueCreateInfo{
+			SType:            vulkan.StructureTypeDeviceQueueCreateInfo,
+			QueueFamilyIndex: queueFamilyIndex,
+			QueueCount:       1,
+			PQueuePriorities: []float32{1.0},
+		})
 	}
 
 	deviceCreateInfo := vulkan.DeviceCreateInfo{
 		SType:                   vulkan.StructureTypeDeviceCreateInfo,
-		QueueCreateInfoCount:    1,
+		QueueCreateInfoCount:    uint32(len(queueCreateInfos)),
 		PQueueCreateInfos:       queueCreateInfos,
 		EnabledExtensionCount:   uint32(len(ctx.enabledDeviceExtensions)),
 		PpEnabledExtensionNames: ctx.enabledDeviceExtensions,
@@ -240,29 +193,19 @@ func (ctx *Context) createDevice() {
 	ctx.device = device
 
 	var graphicsQueue vulkan.Queue
-	vulkan.GetDeviceQueue(ctx.device, ctx.graphicsFamilyIndex, 0, &graphicsQueue)
+	vulkan.GetDeviceQueue(ctx.device, ctx.queueFamilies.graphicsIndex, 0, &graphicsQueue)
 	ctx.graphicsQueue = graphicsQueue
+
+	var presentQueue vulkan.Queue
+	vulkan.GetDeviceQueue(ctx.device, ctx.queueFamilies.presentIndex, 0, &presentQueue)
+	ctx.presentQueue = presentQueue
 }
 
-func (ctx *Context) createWindowSurface() {
+func (ctx *Context) initWindowSurface() {
 	log.DebugCore("Creating window surface")
 
-	surfacePtr, err := ctx.nativeWindow.CreateWindowSurface(ctx.instance, nil)
-	if err != nil {
-		log.PanicfCore("failed to create vulkan window surface, %s", err.Error())
-	}
-	ctx.surface = vulkan.SurfaceFromPointer(surfacePtr)
-
-	var wsiSupported vulkan.Bool32
-	result := vulkan.GetPhysicalDeviceSurfaceSupport(ctx.gpu, ctx.graphicsFamilyIndex, ctx.surface, &wsiSupported)
-	panicOnError(result, "check whether WSI is supported")
-
-	if wsiSupported == vulkan.False {
-		log.PanicCore("the GLFW surface does not support WSI")
-	}
-
 	surfaceCapabilities := vulkan.SurfaceCapabilities{}
-	result = vulkan.GetPhysicalDeviceSurfaceCapabilities(ctx.gpu, ctx.surface, &surfaceCapabilities)
+	result := vulkan.GetPhysicalDeviceSurfaceCapabilities(ctx.gpu, ctx.surface, &surfaceCapabilities)
 	panicOnError(result, "get surface capabilities")
 
 	surfaceCapabilities.Deref()
@@ -359,9 +302,9 @@ func (ctx *Context) createSwapchain() {
 }
 
 func determineImageCount(requested, min, max uint32) uint32 {
-	if requested < min {
-		log.WarnfCore("Requested image count %d not supported by your system, min is %d", requested, min)
-		return min
+	if requested < min+1 {
+		log.WarnfCore("Requested image count %d not supported by your system, min is %d", requested, min+1)
+		return min + 1
 	}
 
 	if max > 0 && requested > max {
@@ -607,15 +550,20 @@ func (ctx *Context) destroyFramebuffers() {
 	}
 }
 
-func (ctx *Context) createSynchronizations() {
+func (ctx *Context) newFence() vulkan.Fence {
 	fenceCreateInfo := vulkan.FenceCreateInfo{
 		SType: vulkan.StructureTypeFenceCreateInfo,
 	}
 
-	var swapchainImageAvailable vulkan.Fence
-	result := vulkan.CreateFence(ctx.device, &fenceCreateInfo, nil, &swapchainImageAvailable)
-	panicOnError(result, "create fence for swapchain image availability")
-	ctx.swapchainImageAvailable = swapchainImageAvailable
+	var fence vulkan.Fence
+	result := vulkan.CreateFence(ctx.device, &fenceCreateInfo, nil, &fence)
+	panicOnError(result, "create fence")
+
+	return fence
+}
+
+func (ctx *Context) createSynchronizations() {
+	ctx.swapchainImageAvailable = ctx.newFence()
 }
 
 func (ctx *Context) getActiveFramebuffer() vulkan.Framebuffer {
@@ -641,8 +589,8 @@ func (ctx *Context) beginRender() {
 	result = vulkan.ResetFences(ctx.device, 1, []vulkan.Fence{ctx.swapchainImageAvailable})
 	panicOnError(result, "reset swapchain image fence")
 
-	result = vulkan.QueueWaitIdle(ctx.graphicsQueue)
-	panicOnError(result, "wait for graphics queue to be idle")
+	//result = vulkan.QueueWaitIdle(ctx.graphicsQueue)
+	//panicOnError(result, "wait for graphics queue to be idle")
 }
 
 func (ctx *Context) endRender(waitSemaphores []vulkan.Semaphore) {
@@ -662,7 +610,7 @@ func (ctx *Context) createCommandPool() {
 	commandPoolCreateInfo := vulkan.CommandPoolCreateInfo{
 		SType:            vulkan.StructureTypeCommandPoolCreateInfo,
 		Flags:            vulkan.CommandPoolCreateFlags(vulkan.CommandPoolCreateTransientBit | vulkan.CommandPoolCreateResetCommandBufferBit),
-		QueueFamilyIndex: ctx.graphicsFamilyIndex,
+		QueueFamilyIndex: ctx.queueFamilies.graphicsIndex,
 	}
 
 	var commandPool vulkan.CommandPool

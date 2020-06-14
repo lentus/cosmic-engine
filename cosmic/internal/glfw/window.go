@@ -29,6 +29,7 @@ func NewWindow(title string, width, height int, graphicsProps graphics.ContextPr
 		log.PanicfCore("Failed to initialise GLFW - %s", err.Error())
 	}
 
+	glfw.WindowHint(glfw.Resizable, glfw.False)
 	if window.vsync {
 		glfw.WindowHint(glfw.RefreshRate, glfw.True)
 	} else {
@@ -106,7 +107,7 @@ func (w *glfwWindow) setCallbacks() {
 }
 
 func (w *glfwWindow) OnUpdate() {
-	w.context.Render()
+	//w.context.Render()
 	glfw.PollEvents()
 }
 

@@ -52,6 +52,14 @@ func vulkanDebugReportCallback(
 }
 
 func (ctx *Context) initDebugCallback() {
+	createInfo := createDebugReportCallbackCreateInfo()
+
+	var debugCallback vulkan.DebugReportCallback
+	vulkan.CreateDebugReportCallback(ctx.instance, &createInfo, nil, &debugCallback)
+	ctx.debugCallback = debugCallback
+}
+
+func createDebugReportCallbackCreateInfo() vulkan.DebugReportCallbackCreateInfo {
 	reportFlagBits :=
 		//vulkan.DebugReportInformationBit |
 		vulkan.DebugReportWarningBit |
@@ -64,7 +72,5 @@ func (ctx *Context) initDebugCallback() {
 		PfnCallback: vulkanDebugReportCallback,
 	}
 
-	var debugCallback vulkan.DebugReportCallback
-	vulkan.CreateDebugReportCallback(ctx.instance, &createInfo, nil, &debugCallback)
-	ctx.debugCallback = debugCallback
+	return createInfo
 }
