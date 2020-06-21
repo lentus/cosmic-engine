@@ -12,15 +12,11 @@ import (
 type Context struct {
 	nativeWindow *glfw.Window
 
-	instance            vulkan.Instance
-	gpu                 vulkan.PhysicalDevice
-	gpuProperties       vulkan.PhysicalDeviceProperties
-	gpuMemoryProperties vulkan.PhysicalDeviceMemoryProperties
-	gpuFeatures         vulkan.PhysicalDeviceFeatures
-	device              vulkan.Device
-	queueFamilies       queueFamilyIndices
-	graphicsQueue       vulkan.Queue
-	presentQueue        vulkan.Queue
+	instance      vulkan.Instance
+	gpu           physicalDevice
+	device        vulkan.Device
+	graphicsQueue vulkan.Queue
+	presentQueue  vulkan.Queue
 
 	surface             vulkan.Surface
 	surfaceFormat       vulkan.SurfaceFormat
@@ -164,9 +160,9 @@ func (ctx *Context) createSurface() {
 func (ctx *Context) createLogicalDevice() {
 	log.DebugCore("Creating Vulkan device")
 
-	uniqueQueueFamilyIndices := []uint32{ctx.queueFamilies.graphicsIndex}
-	if ctx.queueFamilies.hasSeparatePresentQueue() {
-		uniqueQueueFamilyIndices = append(uniqueQueueFamilyIndices, ctx.queueFamilies.presentIndex)
+	uniqueQueueFamilyIndices := []uint32{ctx.gpu.queueFamilies.graphicsIndex}
+	if ctx.gpu.queueFamilies.hasSeparatePresentQueue() {
+		uniqueQueueFamilyIndices = append(uniqueQueueFamilyIndices, ctx.gpu.queueFamilies.presentIndex)
 	}
 
 	var queueCreateInfos []vulkan.DeviceQueueCreateInfo
@@ -188,51 +184,17 @@ func (ctx *Context) createLogicalDevice() {
 	}
 
 	var device vulkan.Device
-	result := vulkan.CreateDevice(ctx.gpu, &deviceCreateInfo, nil, &device)
+	result := vulkan.CreateDevice(ctx.gpu.ref, &deviceCreateInfo, nil, &device)
 	panicOnError(result, "create device instance")
 	ctx.device = device
 
 	var graphicsQueue vulkan.Queue
-	vulkan.GetDeviceQueue(ctx.device, ctx.queueFamilies.graphicsIndex, 0, &graphicsQueue)
+	vulkan.GetDeviceQueue(ctx.device, ctx.gpu.queueFamilies.graphicsIndex, 0, &graphicsQueue)
 	ctx.graphicsQueue = graphicsQueue
 
 	var presentQueue vulkan.Queue
-	vulkan.GetDeviceQueue(ctx.device, ctx.queueFamilies.presentIndex, 0, &presentQueue)
+	vulkan.GetDeviceQueue(ctx.device, ctx.gpu.queueFamilies.presentIndex, 0, &presentQueue)
 	ctx.presentQueue = presentQueue
-}
-
-func (ctx *Context) initWindowSurface() {
-	log.DebugCore("Creating window surface")
-
-	surfaceCapabilities := vulkan.SurfaceCapabilities{}
-	result := vulkan.GetPhysicalDeviceSurfaceCapabilities(ctx.gpu, ctx.surface, &surfaceCapabilities)
-	panicOnError(result, "get surface capabilities")
-
-	surfaceCapabilities.Deref()
-	surfaceCapabilities.CurrentExtent.Deref()
-	surfaceCapabilities.MinImageExtent.Deref()
-	surfaceCapabilities.MaxImageExtent.Deref()
-	ctx.surfaceCapabilities = surfaceCapabilities
-
-	var formatCount uint32
-	result = vulkan.GetPhysicalDeviceSurfaceFormats(ctx.gpu, ctx.surface, &formatCount, nil)
-	panicOnError(result, "get physical device format count")
-	if formatCount == 0 {
-		log.PanicCore("no surface format found")
-	}
-
-	surfaceFormats := make([]vulkan.SurfaceFormat, formatCount)
-	vulkan.GetPhysicalDeviceSurfaceFormats(ctx.gpu, ctx.surface, &formatCount, surfaceFormats)
-	for i := range surfaceFormats {
-		surfaceFormats[i].Deref()
-	}
-
-	if surfaceFormats[0].Format == vulkan.FormatUndefined {
-		ctx.surfaceFormat.Format = vulkan.FormatB8g8r8a8Unorm
-		ctx.surfaceFormat.ColorSpace = vulkan.ColorSpaceSrgbNonlinear
-	} else {
-		ctx.surfaceFormat = surfaceFormats[0]
-	}
 }
 
 func (ctx *Context) createSwapchain() {
@@ -258,10 +220,10 @@ func (ctx *Context) createSwapchain() {
 	presentMode := vulkan.PresentModeFifo
 
 	var presentModeCount uint32
-	result := vulkan.GetPhysicalDeviceSurfacePresentModes(ctx.gpu, ctx.surface, &presentModeCount, nil)
+	result := vulkan.GetPhysicalDeviceSurfacePresentModes(ctx.gpu.ref, ctx.surface, &presentModeCount, nil)
 	panicOnError(result, "retrieve supported present modes")
 	supportedPresentModes := make([]vulkan.PresentMode, presentModeCount)
-	result = vulkan.GetPhysicalDeviceSurfacePresentModes(ctx.gpu, ctx.surface, &presentModeCount, supportedPresentModes)
+	result = vulkan.GetPhysicalDeviceSurfacePresentModes(ctx.gpu.ref, ctx.surface, &presentModeCount, supportedPresentModes)
 	panicOnError(result, "retrieve supported present modes")
 
 	for _, supportedMode := range supportedPresentModes {
@@ -364,7 +326,7 @@ func (ctx *Context) createDepthStencilImage() {
 	}
 	for _, format := range desiredFormats {
 		var formatProps vulkan.FormatProperties
-		vulkan.GetPhysicalDeviceFormatProperties(ctx.gpu, format, &formatProps)
+		vulkan.GetPhysicalDeviceFormatProperties(ctx.gpu.ref, format, &formatProps)
 		formatProps.Deref()
 
 		if formatProps.OptimalTilingFeatures&vulkan.FormatFeatureFlags(vulkan.FormatFeatureDepthStencilAttachmentBit) != 0 {
@@ -610,7 +572,7 @@ func (ctx *Context) createCommandPool() {
 	commandPoolCreateInfo := vulkan.CommandPoolCreateInfo{
 		SType:            vulkan.StructureTypeCommandPoolCreateInfo,
 		Flags:            vulkan.CommandPoolCreateFlags(vulkan.CommandPoolCreateTransientBit | vulkan.CommandPoolCreateResetCommandBufferBit),
-		QueueFamilyIndex: ctx.queueFamilies.graphicsIndex,
+		QueueFamilyIndex: ctx.gpu.queueFamilies.graphicsIndex,
 	}
 
 	var commandPool vulkan.CommandPool

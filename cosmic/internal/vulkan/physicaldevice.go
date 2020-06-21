@@ -6,6 +6,14 @@ import (
 	"github.com/vulkan-go/vulkan"
 )
 
+type physicalDevice struct {
+	ref              vulkan.PhysicalDevice
+	properties       vulkan.PhysicalDeviceProperties
+	memoryProperties vulkan.PhysicalDeviceMemoryProperties
+	features         vulkan.PhysicalDeviceFeatures
+	queueFamilies    queueFamilies
+}
+
 func (ctx *Context) selectPhysicalDevice() {
 	log.DebugCore("Selecting gpu")
 
@@ -16,6 +24,7 @@ func (ctx *Context) selectPhysicalDevice() {
 	panicOnError(result, "retrieve gpu list")
 
 	log.DebugfCore("Found %d gpu(s)", len(gpus))
+	var selected vulkan.PhysicalDevice
 	for _, gpu := range gpus {
 		gpuProperties := getProperties(gpu)
 
@@ -27,29 +36,31 @@ func (ctx *Context) selectPhysicalDevice() {
 		log.DebugfCore("\tDriver version %d", gpuProperties.DriverVersion)
 		log.DebugCore("")
 
-		if isDeviceSuitable(gpu, ctx.surface, ctx.enabledDeviceExtensions) && ctx.gpu == nil {
+		if isDeviceSuitable(gpu, ctx.surface, ctx.enabledDeviceExtensions) && selected == nil {
 			// TODO find best performing one
-			ctx.gpu = gpu
+			selected = gpu
 		}
 	}
 
-	if ctx.gpu == nil {
+	if selected == nil {
 		log.PanicCore("failed to find a suitable gpu")
 	}
 
-	ctx.gpuProperties = getProperties(ctx.gpu)
-	ctx.gpuMemoryProperties = getMemoryProperties(ctx.gpu)
-	ctx.gpuFeatures = getFeatures(ctx.gpu)
-	log.InfofCore("\tUsing %s", string(ctx.gpuProperties.DeviceName[:]))
+	ctx.gpu = physicalDevice{
+		ref:              selected,
+		properties:       getProperties(selected),
+		memoryProperties: getMemoryProperties(selected),
+		features:         getFeatures(selected),
+		queueFamilies:    findQueueFamilies(selected, ctx.surface),
+	}
+	log.InfofCore("\tUsing %s", string(ctx.gpu.properties.DeviceName[:]))
 
-	ctx.availableDeviceExtensions = getExtensions(ctx.gpu)
+	ctx.availableDeviceExtensions = getExtensions(ctx.gpu.ref)
 	log.DebugfCore("Device extensions (%d):", len(ctx.availableDeviceExtensions))
 	for _, deviceExtension := range ctx.availableDeviceExtensions {
 		deviceExtension.Deref()
 		log.DebugfCore("\t%s", deviceExtension.ExtensionName)
 	}
-
-	ctx.queueFamilies = findQueueFamilies(ctx.gpu, ctx.surface)
 }
 
 func isDeviceSuitable(gpu vulkan.PhysicalDevice, surface vulkan.Surface, enabledExtensions []string) bool {
@@ -110,7 +121,7 @@ func getExtensions(gpu vulkan.PhysicalDevice) []vulkan.ExtensionProperties {
 	return extensionProperties
 }
 
-type queueFamilyIndices struct {
+type queueFamilies struct {
 	graphicsIndex    uint32
 	hasGraphicsIndex bool
 
@@ -118,21 +129,21 @@ type queueFamilyIndices struct {
 	hasPresentIndex bool
 }
 
-func (qf queueFamilyIndices) complete() bool {
+func (qf queueFamilies) complete() bool {
 	return qf.hasGraphicsIndex && qf.hasPresentIndex
 }
 
-func (qf queueFamilyIndices) hasSeparatePresentQueue() bool {
+func (qf queueFamilies) hasSeparatePresentQueue() bool {
 	return qf.graphicsIndex != qf.presentIndex
 }
 
-func findQueueFamilies(device vulkan.PhysicalDevice, surface vulkan.Surface) queueFamilyIndices {
+func findQueueFamilies(device vulkan.PhysicalDevice, surface vulkan.Surface) queueFamilies {
 	var familyCount uint32
 	vulkan.GetPhysicalDeviceQueueFamilyProperties(device, &familyCount, nil)
 	queueFamiliePropertiesList := make([]vulkan.QueueFamilyProperties, familyCount)
 	vulkan.GetPhysicalDeviceQueueFamilyProperties(device, &familyCount, queueFamiliePropertiesList)
 
-	var queueFamilies queueFamilyIndices
+	var queueFamilies queueFamilies
 	for i, properties := range queueFamiliePropertiesList {
 		properties.Deref()
 
