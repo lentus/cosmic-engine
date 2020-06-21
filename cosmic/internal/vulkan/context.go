@@ -12,15 +12,13 @@ import (
 type Context struct {
 	nativeWindow *glfw.Window
 
-	instance      vulkan.Instance
+	instance vulkan.Instance
+
+	surface       surface
 	gpu           physicalDevice
 	device        vulkan.Device
 	graphicsQueue vulkan.Queue
 	presentQueue  vulkan.Queue
-
-	surface             vulkan.Surface
-	surfaceFormat       vulkan.SurfaceFormat
-	surfaceCapabilities vulkan.SurfaceCapabilities
 
 	swapchain                 vulkan.Swapchain
 	swapchainImageCount       uint32
@@ -82,7 +80,7 @@ func NewContext(nativeWindow *glfw.Window, bufferingType graphics.ImageBuffering
 	ctx.createSurface()
 	ctx.selectPhysicalDevice()
 	ctx.createLogicalDevice()
-	ctx.initWindowSurface()
+	ctx.initSurfaceProperties()
 	ctx.createSwapchain()
 	ctx.createSwapchainImages()
 	ctx.createDepthStencilImage()
@@ -111,7 +109,7 @@ func (ctx *Context) Terminate() {
 	ctx.destroyDepthStencilImage()
 	ctx.destroySwapchainImageViews()
 	vulkan.DestroySwapchain(ctx.device, ctx.swapchain, nil) // Destroys swapchain images as well
-	vulkan.DestroySurface(ctx.instance, ctx.surface, nil)
+	vulkan.DestroySurface(ctx.instance, ctx.surface.ref, nil)
 	vulkan.DestroyDevice(ctx.device, nil)
 	vulkan.DestroyDebugReportCallback(ctx.instance, ctx.debugCallback, nil)
 	vulkan.DestroyInstance(ctx.instance, nil)
@@ -147,14 +145,6 @@ func (ctx *Context) createVulkanInstance() {
 	if err := vulkan.InitInstance(ctx.instance); err != nil {
 		log.PanicfCore("failed to initialise Vulkan instance (%s)", err.Error())
 	}
-}
-
-func (ctx *Context) createSurface() {
-	surfacePtr, err := ctx.nativeWindow.CreateWindowSurface(ctx.instance, nil)
-	if err != nil {
-		log.PanicfCore("failed to create vulkan window surface, %s", err.Error())
-	}
-	ctx.surface = vulkan.SurfaceFromPointer(surfacePtr)
 }
 
 func (ctx *Context) createLogicalDevice() {
@@ -201,43 +191,25 @@ func (ctx *Context) createSwapchain() {
 	log.DebugCore("Creating Vulkan swapchain")
 
 	ctx.swapchainImageCount = determineImageCount(
-		ctx.swapchainImageCount, ctx.surfaceCapabilities.MinImageCount, ctx.surfaceCapabilities.MaxImageCount,
+		ctx.swapchainImageCount, ctx.surface.capabilities.MinImageCount, ctx.surface.capabilities.MaxImageCount,
 	)
 
 	var swapchainImageExtent vulkan.Extent2D
-	if ctx.surfaceCapabilities.CurrentExtent.Width != vulkan.MaxUint32 {
-		swapchainImageExtent.Width = ctx.surfaceCapabilities.CurrentExtent.Width
-		swapchainImageExtent.Height = ctx.surfaceCapabilities.CurrentExtent.Height
+	if ctx.surface.capabilities.CurrentExtent.Width != vulkan.MaxUint32 {
+		swapchainImageExtent.Width = ctx.surface.capabilities.CurrentExtent.Width
+		swapchainImageExtent.Height = ctx.surface.capabilities.CurrentExtent.Height
 	} else {
 		width, height := ctx.nativeWindow.GetSize()
 		swapchainImageExtent.Width = uint32(width)
 		swapchainImageExtent.Height = uint32(height)
 	}
 
-	// Attempt to use Mailbox present mode if available, otherwise use FIFO
-	// THIS BEHAVIOUR ENABLES VSYNC BY DEFAULT! Use PresentModeImmediate to
-	// support disabled VSYNC.
-	presentMode := vulkan.PresentModeFifo
-
-	var presentModeCount uint32
-	result := vulkan.GetPhysicalDeviceSurfacePresentModes(ctx.gpu.ref, ctx.surface, &presentModeCount, nil)
-	panicOnError(result, "retrieve supported present modes")
-	supportedPresentModes := make([]vulkan.PresentMode, presentModeCount)
-	result = vulkan.GetPhysicalDeviceSurfacePresentModes(ctx.gpu.ref, ctx.surface, &presentModeCount, supportedPresentModes)
-	panicOnError(result, "retrieve supported present modes")
-
-	for _, supportedMode := range supportedPresentModes {
-		if supportedMode == vulkan.PresentModeMailbox {
-			presentMode = supportedMode
-		}
-	}
-
 	swapchainCreateInfo := vulkan.SwapchainCreateInfo{
 		SType:                 vulkan.StructureTypeSwapchainCreateInfo,
-		Surface:               ctx.surface,
+		Surface:               ctx.surface.ref,
 		MinImageCount:         ctx.swapchainImageCount,
-		ImageFormat:           ctx.surfaceFormat.Format,
-		ImageColorSpace:       ctx.surfaceFormat.ColorSpace,
+		ImageFormat:           ctx.surface.format.Format,
+		ImageColorSpace:       ctx.surface.format.ColorSpace,
 		ImageExtent:           swapchainImageExtent,
 		ImageArrayLayers:      1, // No stereoscopic rendering, which requires 2
 		ImageUsage:            vulkan.ImageUsageFlags(vulkan.ImageUsageColorAttachmentBit),
@@ -246,12 +218,12 @@ func (ctx *Context) createSwapchain() {
 		PQueueFamilyIndices:   nil, // Ignored since sharing mode is exclusive
 		PreTransform:          vulkan.SurfaceTransformIdentityBit,
 		CompositeAlpha:        vulkan.CompositeAlphaOpaqueBit,
-		PresentMode:           presentMode,
+		PresentMode:           ctx.surface.presentMode,
 		Clipped:               vulkan.True,
 		OldSwapchain:          nil,
 	}
 	var swapchain vulkan.Swapchain
-	result = vulkan.CreateSwapchain(ctx.device, &swapchainCreateInfo, nil, &swapchain)
+	result := vulkan.CreateSwapchain(ctx.device, &swapchainCreateInfo, nil, &swapchain)
 	panicOnError(result, "create swapchain")
 
 	ctx.swapchain = swapchain
@@ -289,7 +261,7 @@ func (ctx *Context) createSwapchainImages() {
 			SType:      vulkan.StructureTypeImageViewCreateInfo,
 			Image:      ctx.swapchainImages[i],
 			ViewType:   vulkan.ImageViewType2d,
-			Format:     ctx.surfaceFormat.Format,
+			Format:     ctx.surface.format.Format,
 			Components: vulkan.ComponentMapping{}, // Use identity mapping for rgba components
 			SubresourceRange: vulkan.ImageSubresourceRange{
 				AspectMask:     vulkan.ImageAspectFlags(vulkan.ImageAspectColorBit),
@@ -351,8 +323,8 @@ func (ctx *Context) createDepthStencilImage() {
 		ImageType: vulkan.ImageType2d,
 		Format:    ctx.depthStencilFormat,
 		Extent: vulkan.Extent3D{
-			Width:  ctx.surfaceCapabilities.CurrentExtent.Width,
-			Height: ctx.surfaceCapabilities.CurrentExtent.Height,
+			Width:  ctx.surface.capabilities.CurrentExtent.Width,
+			Height: ctx.surface.capabilities.CurrentExtent.Height,
 			Depth:  1,
 		},
 		MipLevels:             1,
@@ -438,7 +410,7 @@ func (ctx *Context) createRenderPass() {
 	}
 	// Color attachment
 	attachments[1] = vulkan.AttachmentDescription{
-		Format:        ctx.surfaceFormat.Format,
+		Format:        ctx.surface.format.Format,
 		Samples:       vulkan.SampleCount1Bit,
 		LoadOp:        vulkan.AttachmentLoadOpClear,
 		StoreOp:       vulkan.AttachmentStoreOpStore,
@@ -495,8 +467,8 @@ func (ctx *Context) createFramebuffers() {
 			RenderPass:      ctx.renderPass,
 			AttachmentCount: uint32(len(attachments)),
 			PAttachments:    attachments,
-			Width:           ctx.surfaceCapabilities.CurrentExtent.Width,
-			Height:          ctx.surfaceCapabilities.CurrentExtent.Height,
+			Width:           ctx.surface.capabilities.CurrentExtent.Width,
+			Height:          ctx.surface.capabilities.CurrentExtent.Height,
 			Layers:          1,
 		}
 		var framebuffer vulkan.Framebuffer
@@ -534,8 +506,8 @@ func (ctx *Context) getActiveFramebuffer() vulkan.Framebuffer {
 
 func (ctx *Context) getSurfaceSize() vulkan.Extent2D {
 	return vulkan.Extent2D{
-		Width:  ctx.surfaceCapabilities.CurrentExtent.Width,
-		Height: ctx.surfaceCapabilities.CurrentExtent.Height,
+		Width:  ctx.surface.capabilities.CurrentExtent.Width,
+		Height: ctx.surface.capabilities.CurrentExtent.Height,
 	}
 }
 

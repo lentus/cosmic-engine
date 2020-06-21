@@ -36,7 +36,7 @@ func (ctx *Context) selectPhysicalDevice() {
 		log.DebugfCore("\tDriver version %d", gpuProperties.DriverVersion)
 		log.DebugCore("")
 
-		if isDeviceSuitable(gpu, ctx.surface, ctx.enabledDeviceExtensions) && selected == nil {
+		if isDeviceSuitable(gpu, ctx.surface.ref, ctx.enabledDeviceExtensions) && selected == nil {
 			// TODO find best performing one
 			selected = gpu
 		}
@@ -51,7 +51,7 @@ func (ctx *Context) selectPhysicalDevice() {
 		properties:       getProperties(selected),
 		memoryProperties: getMemoryProperties(selected),
 		features:         getFeatures(selected),
-		queueFamilies:    findQueueFamilies(selected, ctx.surface),
+		queueFamilies:    findQueueFamilies(selected, ctx.surface.ref),
 	}
 	log.InfofCore("\tUsing %s", string(ctx.gpu.properties.DeviceName[:]))
 
@@ -80,12 +80,13 @@ func isDeviceSuitable(gpu vulkan.PhysicalDevice, surface vulkan.Surface, enabled
 	}
 
 	for _, requiredExtension := range enabledExtensions {
-		if _, found := availableExtensionMap[requiredExtension]; !found {
+		if _, extensionSupported := availableExtensionMap[requiredExtension]; !extensionSupported {
 			return false
 		}
 	}
 
-	return true
+	// Check whether surface can be drawn to
+	return len(getSurfaceFormats(gpu, surface)) > 0 && len(getPresentModes(gpu, surface)) > 0
 }
 
 func getProperties(gpu vulkan.PhysicalDevice) vulkan.PhysicalDeviceProperties {
