@@ -37,26 +37,10 @@ func (ctx *Context) initSurfaceProperties() {
 	for i := range surfaceFormats {
 		surfaceFormats[i].Deref()
 	}
-
-	if surfaceFormats[0].Format == vulkan.FormatUndefined {
-		ctx.surface.format.Format = vulkan.FormatB8g8r8a8Unorm
-		ctx.surface.format.ColorSpace = vulkan.ColorSpaceSrgbNonlinear
-	} else {
-		ctx.surface.format = surfaceFormats[0]
-	}
+	ctx.surface.format = pickSurfaceFormat(surfaceFormats)
 
 	supportedPresentModes := getPresentModes(ctx.gpu.ref, ctx.surface.ref)
-
-	// Attempt to use Mailbox present mode if available, otherwise use FIFO
-	// THIS BEHAVIOUR ENABLES VSYNC BY DEFAULT! Use PresentModeImmediate to
-	// support disabled VSYNC.
-	ctx.surface.presentMode = vulkan.PresentModeFifo
-
-	for _, supportedMode := range supportedPresentModes {
-		if supportedMode == vulkan.PresentModeMailbox {
-			ctx.surface.presentMode = supportedMode
-		}
-	}
+	ctx.surface.presentMode = pickPresentMode(supportedPresentModes)
 }
 
 func getSurfaceCapabilities(gpu vulkan.PhysicalDevice, surface vulkan.Surface) vulkan.SurfaceCapabilities {
@@ -91,4 +75,29 @@ func getPresentModes(gpu vulkan.PhysicalDevice, surface vulkan.Surface) []vulkan
 	panicOnError(result, "retrieve supported present modes")
 
 	return supportedPresentModes
+}
+
+// pickSurfaceFormat attempts to use SRGB. If that is not supported, use the
+// first format supported format.
+func pickSurfaceFormat(supportedFormats []vulkan.SurfaceFormat) vulkan.SurfaceFormat {
+	for _, format := range supportedFormats {
+		if format.Format == vulkan.FormatB8g8r8a8Srgb && format.ColorSpace == vulkan.ColorSpaceSrgbNonlinear {
+			return format
+		}
+	}
+
+	return supportedFormats[0]
+}
+
+// pickPresentMode attempts to use Mailbox present mode if available. Otherwise,
+// FIFO is used. THIS BEHAVIOUR ENABLES VSYNC BY DEFAULT! Use
+// PresentModeImmediate to support disabled VSYNC.
+func pickPresentMode(supportedPresentModes []vulkan.PresentMode) vulkan.PresentMode {
+	for _, presentMode := range supportedPresentModes {
+		if presentMode == vulkan.PresentModeMailbox {
+			return presentMode
+		}
+	}
+
+	return vulkan.PresentModeFifo
 }
