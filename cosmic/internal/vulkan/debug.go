@@ -8,10 +8,7 @@ import (
 
 func (ctx *Context) setupDebug() {
 	// Setup debug layers
-	ctx.enableLayerIfAvailable("VK_LAYER_LUNARG_core_validation")
-	ctx.enableLayerIfAvailable("VK_LAYER_LUNARG_parameter_validation")
-	ctx.enableLayerIfAvailable("VK_LAYER_LUNARG_object_tracker")
-	ctx.enableLayerIfAvailable("VK_LAYER_GOOGLE_threading")
+	ctx.enableLayerIfAvailable("VK_LAYER_KHRONOS_validation")
 	ctx.enableLayerIfAvailable("VK_LAYER_LUNARG_screenshot")
 	ctx.enableLayerIfAvailable("VK_LAYER_LUNARG_monitor")
 

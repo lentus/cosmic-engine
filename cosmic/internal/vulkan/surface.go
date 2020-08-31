@@ -24,25 +24,6 @@ func (ctx *Context) createSurface() {
 	}
 }
 
-func (ctx *Context) initSurfaceProperties() {
-	log.DebugCore("Creating window surface")
-
-	ctx.surface.capabilities = getSurfaceCapabilities(ctx.gpu.ref, ctx.surface.ref)
-	ctx.surface.capabilities.Deref()
-	ctx.surface.capabilities.CurrentExtent.Deref()
-	ctx.surface.capabilities.MinImageExtent.Deref()
-	ctx.surface.capabilities.MaxImageExtent.Deref()
-
-	surfaceFormats := getSurfaceFormats(ctx.gpu.ref, ctx.surface.ref)
-	for i := range surfaceFormats {
-		surfaceFormats[i].Deref()
-	}
-	ctx.surface.format = pickSurfaceFormat(surfaceFormats)
-
-	supportedPresentModes := getPresentModes(ctx.gpu.ref, ctx.surface.ref)
-	ctx.surface.presentMode = pickPresentMode(supportedPresentModes)
-}
-
 func getSurfaceCapabilities(gpu vulkan.PhysicalDevice, surface vulkan.Surface) vulkan.SurfaceCapabilities {
 	surfaceCapabilities := vulkan.SurfaceCapabilities{}
 	result := vulkan.GetPhysicalDeviceSurfaceCapabilities(gpu, surface, &surfaceCapabilities)
@@ -78,7 +59,7 @@ func getPresentModes(gpu vulkan.PhysicalDevice, surface vulkan.Surface) []vulkan
 }
 
 // pickSurfaceFormat attempts to use SRGB. If that is not supported, use the
-// first format supported format.
+// first supported format.
 func pickSurfaceFormat(supportedFormats []vulkan.SurfaceFormat) vulkan.SurfaceFormat {
 	for _, format := range supportedFormats {
 		if format.Format == vulkan.FormatB8g8r8a8Srgb && format.ColorSpace == vulkan.ColorSpaceSrgbNonlinear {
