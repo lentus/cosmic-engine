@@ -35,6 +35,8 @@ func vulkanDebugReportCallback(
 	fmtString := "Vulkan %s [%s] - %s (code %d)"
 
 	switch {
+	case flags&debugBit != 0:
+		log.DebugfCore(fmtString, layer, fmtObjectType(objectType), msg, msgCode)
 	case flags&infoBit != 0:
 		log.InfofCore(fmtString, layer, fmtObjectType(objectType), msg, msgCode)
 	case flags&warnBit != 0:
@@ -58,7 +60,8 @@ func (ctx *Context) initDebugCallback() {
 
 func createDebugReportCallbackCreateInfo() vulkan.DebugReportCallbackCreateInfo {
 	reportFlagBits :=
-		//vulkan.DebugReportInformationBit |
+		//vulkan.DebugReportDebugBit |
+		//	vulkan.DebugReportInformationBit |
 		vulkan.DebugReportWarningBit |
 			vulkan.DebugReportErrorBit |
 			vulkan.DebugReportPerformanceWarningBit

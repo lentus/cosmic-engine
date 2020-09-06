@@ -12,7 +12,7 @@ func (ctx *Context) setupLayersAndExtensions() {
 
 	requiredInstanceExtensions := ctx.nativeWindow.GetRequiredInstanceExtensions()
 
-	log.DebugCore("Enabled instance extensions:")
+	log.DebugCore("Required instance extensions:")
 	for _, extension := range requiredInstanceExtensions {
 		log.DebugfCore("\t%s", extension)
 	}
@@ -22,7 +22,7 @@ func (ctx *Context) setupLayersAndExtensions() {
 		safeStr(vulkan.KhrSwapchainExtensionName),
 	}
 
-	log.DebugCore("Enabled device extensions:")
+	log.DebugCore("Required device extensions:")
 	for _, extension := range requiredDeviceExtensions {
 		log.DebugfCore("\t%s", extension)
 	}

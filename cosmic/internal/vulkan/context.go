@@ -1,11 +1,10 @@
 package vulkan
 
 import (
-	"github.com/lentus/cosmic-engine/cosmic/graphics"
 	"github.com/lentus/cosmic-engine/cosmic/log"
 	"github.com/vulkan-go/glfw/v3.3/glfw"
 	"github.com/vulkan-go/vulkan"
-	"unsafe"
+	"strconv"
 )
 
 type Context struct {
@@ -19,13 +18,10 @@ type Context struct {
 	graphicsQueue vulkan.Queue
 	presentQueue  vulkan.Queue
 
-	swapchain                 vulkan.Swapchain
-	swapchainImageCount       uint32
-	swapchainImages           []vulkan.Image
-	swapchainImageViews       []vulkan.ImageView
-	activeSwapchainImageindex uint32
-
-	swapchainImageAvailable vulkan.Fence
+	swapchain           vulkan.Swapchain
+	swapchainImageCount uint32
+	swapchainImages     []vulkan.Image
+	swapchainImageViews []vulkan.ImageView
 
 	framebuffers []vulkan.Framebuffer
 	renderPass   vulkan.RenderPass
@@ -45,13 +41,13 @@ type Context struct {
 
 	debugCallback vulkan.DebugReportCallback
 
-	// These are only here for demo purposes so I can test the vulkan implementation
 	commandPool             vulkan.CommandPool
-	commandBuffer           vulkan.CommandBuffer
+	commandBuffers          []vulkan.CommandBuffer
+	imageAvailableSemaphore vulkan.Semaphore
 	renderCompleteSemaphore vulkan.Semaphore
 }
 
-func NewContext(nativeWindow *glfw.Window, bufferingType graphics.ImageBuffering) *Context {
+func NewContext(nativeWindow *glfw.Window) *Context {
 	log.InfoCore("Creating Vulkan graphics context")
 
 	if !glfw.VulkanSupported() {
@@ -63,7 +59,6 @@ func NewContext(nativeWindow *glfw.Window, bufferingType graphics.ImageBuffering
 		enabledInstanceLayers:     make([]string, 0),
 		enabledInstanceExtensions: make([]string, 0),
 		enabledDeviceExtensions:   make([]string, 0),
-		swapchainImageCount:       uint32(bufferingType) + 2, // First buffering type DoubleBuffering has index 0
 	}
 	ctx.nativeWindow.MakeContextCurrent()
 
@@ -81,30 +76,32 @@ func NewContext(nativeWindow *glfw.Window, bufferingType graphics.ImageBuffering
 	ctx.createLogicalDevice()
 	ctx.createSwapchain()
 	ctx.createSwapchainImages()
-	ctx.createDepthStencilImage()
+
+	// Graphics pipeline
+	//ctx.createDepthStencilImage()
 	ctx.createRenderPass()
 	ctx.createFramebuffers()
+
+	ctx.createCommandPool()
+	ctx.createCommandBuffers()
 	ctx.createSynchronizations()
 
 	// These are only here so I can test the vulkan implementation
-	ctx.createCommandPool()
-	ctx.createCommandBuffer()
-	ctx.createRenderCompleteSemaphore()
+	//ctx.createRenderCompleteSemaphore()
 
 	return &ctx
 }
 
 func (ctx *Context) Terminate() {
 	log.DebugCore("Terminating Vulkan graphics context")
-	vulkan.QueueWaitIdle(ctx.graphicsQueue) // Wait for the graphics queue to be idle
+	vulkan.DeviceWaitIdle(ctx.device) // Wait for the graphics queue to be idle
 
-	vulkan.DestroySemaphore(ctx.device, ctx.renderCompleteSemaphore, nil)
+	ctx.destroySynchronizations()
 	vulkan.DestroyCommandPool(ctx.device, ctx.commandPool, nil)
 
-	vulkan.DestroyFence(ctx.device, ctx.swapchainImageAvailable, nil)
 	ctx.destroyFramebuffers()
 	vulkan.DestroyRenderPass(ctx.device, ctx.renderPass, nil)
-	ctx.destroyDepthStencilImage()
+	//ctx.destroyDepthStencilImage()
 	ctx.destroySwapchainImageViews()
 	vulkan.DestroySwapchain(ctx.device, ctx.swapchain, nil) // Destroys swapchain images as well
 	vulkan.DestroySurface(ctx.instance, ctx.surface.ref, nil)
@@ -119,15 +116,13 @@ func (ctx *Context) createVulkanInstance() {
 	// TODO get version info and application name from somewhere
 	applicationInfo := vulkan.ApplicationInfo{
 		SType:         vulkan.StructureTypeApplicationInfo,
-		ApiVersion:    vulkan.MakeVersion(1, 1, 88),
+		ApiVersion:    vulkan.ApiVersion10,
 		PEngineName:   safeStr("Cosmic Engine"),
 		EngineVersion: vulkan.MakeVersion(0, 1, 0),
 	}
 
-	debugReportCallbackCreateInfo := createDebugReportCallbackCreateInfo()
 	instanceCreateInfo := vulkan.InstanceCreateInfo{
 		SType:                   vulkan.StructureTypeInstanceCreateInfo,
-		PNext:                   unsafe.Pointer(&debugReportCallbackCreateInfo), // Enable debug callback for instance creation
 		PApplicationInfo:        &applicationInfo,
 		EnabledLayerCount:       uint32(len(ctx.enabledInstanceLayers)),
 		PpEnabledLayerNames:     ctx.enabledInstanceLayers,
@@ -148,13 +143,13 @@ func (ctx *Context) createVulkanInstance() {
 func (ctx *Context) createLogicalDevice() {
 	log.DebugCore("Creating Vulkan device")
 
-	uniqueQueueFamilyIndices := []uint32{ctx.gpu.queueFamilies.graphicsIndex}
+	queueFamilyIndices := []uint32{ctx.gpu.queueFamilies.graphicsIndex}
 	if ctx.gpu.queueFamilies.hasSeparatePresentQueue() {
-		uniqueQueueFamilyIndices = append(uniqueQueueFamilyIndices, ctx.gpu.queueFamilies.presentIndex)
+		queueFamilyIndices = append(queueFamilyIndices, ctx.gpu.queueFamilies.presentIndex)
 	}
 
 	var queueCreateInfos []vulkan.DeviceQueueCreateInfo
-	for _, queueFamilyIndex := range uniqueQueueFamilyIndices {
+	for _, queueFamilyIndex := range queueFamilyIndices {
 		queueCreateInfos = append(queueCreateInfos, vulkan.DeviceQueueCreateInfo{
 			SType:            vulkan.StructureTypeDeviceQueueCreateInfo,
 			QueueFamilyIndex: queueFamilyIndex,
@@ -295,47 +290,42 @@ func (ctx *Context) destroyDepthStencilImage() {
 }
 
 func (ctx *Context) createRenderPass() {
-	attachments := make([]vulkan.AttachmentDescription, 2)
+	attachments := make([]vulkan.AttachmentDescription, 1)
 
-	// Depth attachment
+	// Color attachment
 	attachments[0] = vulkan.AttachmentDescription{
-		Format:         ctx.depthStencilFormat,
+		Format:         ctx.surface.format.Format,
 		Samples:        vulkan.SampleCount1Bit,
 		LoadOp:         vulkan.AttachmentLoadOpClear,
-		StoreOp:        vulkan.AttachmentStoreOpDontCare,
+		StoreOp:        vulkan.AttachmentStoreOpStore,
 		StencilLoadOp:  vulkan.AttachmentLoadOpDontCare,
-		StencilStoreOp: vulkan.AttachmentStoreOpStore,
+		StencilStoreOp: vulkan.AttachmentStoreOpDontCare,
 		InitialLayout:  vulkan.ImageLayoutUndefined,
-		FinalLayout:    vulkan.ImageLayoutDepthStencilAttachmentOptimal,
-	}
-	// Color attachment
-	attachments[1] = vulkan.AttachmentDescription{
-		Format:        ctx.surface.format.Format,
-		Samples:       vulkan.SampleCount1Bit,
-		LoadOp:        vulkan.AttachmentLoadOpClear,
-		StoreOp:       vulkan.AttachmentStoreOpStore,
-		InitialLayout: vulkan.ImageLayoutUndefined,
-		FinalLayout:   vulkan.ImageLayoutPresentSrc,
+		FinalLayout:    vulkan.ImageLayoutPresentSrc,
 	}
 
-	depthStencilAttachment := vulkan.AttachmentReference{
-		Attachment: 0,
-		Layout:     vulkan.ImageLayoutDepthStencilAttachmentOptimal,
-	}
 	colorAttachments := make([]vulkan.AttachmentReference, 1)
 	colorAttachments[0] = vulkan.AttachmentReference{
-		Attachment: 1, // Reference to the color attachment index
+		Attachment: 0, // Reference to the color attachment index
 		Layout:     vulkan.ImageLayoutColorAttachmentOptimal,
 	}
 
 	subPasses := make([]vulkan.SubpassDescription, 1)
 	subPasses[0] = vulkan.SubpassDescription{
-		PipelineBindPoint:       vulkan.PipelineBindPointGraphics,
-		InputAttachmentCount:    0,   // No other sub passes to reference
-		PInputAttachments:       nil, // No other sub passes to reference
-		ColorAttachmentCount:    uint32(len(colorAttachments)),
-		PColorAttachments:       colorAttachments,
-		PDepthStencilAttachment: &depthStencilAttachment,
+		PipelineBindPoint:    vulkan.PipelineBindPointGraphics,
+		ColorAttachmentCount: uint32(len(colorAttachments)),
+		PColorAttachments:    colorAttachments,
+	}
+
+	// Make sure the subpass is not processed before it can write to the color attachment
+	subpassDependencies := make([]vulkan.SubpassDependency, 1)
+	subpassDependencies[0] = vulkan.SubpassDependency{
+		SrcSubpass:    vulkan.SubpassExternal,
+		DstSubpass:    0,
+		SrcStageMask:  vulkan.PipelineStageFlags(vulkan.PipelineStageColorAttachmentOutputBit),
+		DstStageMask:  vulkan.PipelineStageFlags(vulkan.PipelineStageColorAttachmentOutputBit),
+		SrcAccessMask: 0,
+		DstAccessMask: vulkan.AccessFlags(vulkan.AccessColorAttachmentWriteBit),
 	}
 
 	renderPassCreateInfo := vulkan.RenderPassCreateInfo{
@@ -344,8 +334,8 @@ func (ctx *Context) createRenderPass() {
 		PAttachments:    attachments,
 		SubpassCount:    uint32(len(subPasses)),
 		PSubpasses:      subPasses,
-		DependencyCount: 0,   // No dependencies between sub passes
-		PDependencies:   nil, // No dependencies between sub passes
+		DependencyCount: 1,
+		PDependencies:   subpassDependencies,
 	}
 
 	var renderPass vulkan.RenderPass
@@ -357,10 +347,8 @@ func (ctx *Context) createRenderPass() {
 func (ctx *Context) createFramebuffers() {
 	ctx.framebuffers = make([]vulkan.Framebuffer, ctx.swapchainImageCount)
 
-	for i := uint32(0); i < ctx.swapchainImageCount; i++ {
-		attachments := make([]vulkan.ImageView, 2)
-		attachments[0] = ctx.depthStencilImageView
-		attachments[1] = ctx.swapchainImageViews[i]
+	for i := range ctx.framebuffers {
+		attachments := []vulkan.ImageView{ctx.swapchainImageViews[i]}
 
 		framebufferCreateInfo := vulkan.FramebufferCreateInfo{
 			SType:           vulkan.StructureTypeFramebufferCreateInfo,
@@ -371,9 +359,10 @@ func (ctx *Context) createFramebuffers() {
 			Height:          ctx.surface.capabilities.CurrentExtent.Height,
 			Layers:          1,
 		}
+
 		var framebuffer vulkan.Framebuffer
 		result := vulkan.CreateFramebuffer(ctx.device, &framebufferCreateInfo, nil, &framebuffer)
-		panicOnError(result, "create framebuffer for swapchain image "+string(i))
+		panicOnError(result, "create framebuffer for swapchain image "+strconv.Itoa(int(i)))
 		ctx.framebuffers[i] = framebuffer
 	}
 }
@@ -382,6 +371,86 @@ func (ctx *Context) destroyFramebuffers() {
 	for _, framebuffer := range ctx.framebuffers {
 		vulkan.DestroyFramebuffer(ctx.device, framebuffer, nil)
 	}
+}
+
+func (ctx *Context) createCommandPool() {
+	commandPoolCreateInfo := vulkan.CommandPoolCreateInfo{
+		SType:            vulkan.StructureTypeCommandPoolCreateInfo,
+		QueueFamilyIndex: ctx.gpu.queueFamilies.graphicsIndex,
+		Flags:            0,
+	}
+
+	var commandPool vulkan.CommandPool
+	result := vulkan.CreateCommandPool(ctx.device, &commandPoolCreateInfo, nil, &commandPool)
+	panicOnError(result, "create command pool")
+	ctx.commandPool = commandPool
+}
+
+func (ctx *Context) createCommandBuffers() {
+	ctx.commandBuffers = make([]vulkan.CommandBuffer, ctx.swapchainImageCount)
+	commandBufferAllocateInfo := vulkan.CommandBufferAllocateInfo{
+		SType:              vulkan.StructureTypeCommandBufferAllocateInfo,
+		CommandPool:        ctx.commandPool,
+		Level:              vulkan.CommandBufferLevelPrimary,
+		CommandBufferCount: uint32(len(ctx.commandBuffers)),
+	}
+
+	result := vulkan.AllocateCommandBuffers(ctx.device, &commandBufferAllocateInfo, ctx.commandBuffers)
+	panicOnError(result, "allocate command buffers")
+
+	// Record command buffers
+	for i := range ctx.commandBuffers {
+		beginInfo := vulkan.CommandBufferBeginInfo{
+			SType:            vulkan.StructureTypeCommandBufferBeginInfo,
+			Flags:            0,
+			PInheritanceInfo: nil,
+		}
+		result = vulkan.BeginCommandBuffer(ctx.commandBuffers[i], &beginInfo)
+		panicOnError(result, "start recording command buffer "+strconv.Itoa(i))
+
+		renderArea := vulkan.Rect2D{
+			Offset: vulkan.Offset2D{
+				X: 0,
+				Y: 0,
+			},
+			Extent: ctx.getSurfaceSize(),
+		}
+
+		clearValues := make([]vulkan.ClearValue, 1)
+		clearValues[0].SetColor([]float32{0.8, 0.2, 0.2, 1.0})
+
+		renderPassBeginInfo := vulkan.RenderPassBeginInfo{
+			SType:           vulkan.StructureTypeRenderPassBeginInfo,
+			RenderPass:      ctx.renderPass,
+			Framebuffer:     ctx.framebuffers[i],
+			RenderArea:      renderArea,
+			ClearValueCount: uint32(len(clearValues)),
+			PClearValues:    clearValues,
+		}
+
+		vulkan.CmdBeginRenderPass(ctx.commandBuffers[i], &renderPassBeginInfo, vulkan.SubpassContentsInline)
+		vulkan.CmdEndRenderPass(ctx.commandBuffers[i])
+
+		result = vulkan.EndCommandBuffer(ctx.commandBuffers[i])
+		panicOnError(result, "stop recording command buffer "+strconv.Itoa(i))
+	}
+}
+
+func (ctx *Context) getSurfaceSize() vulkan.Extent2D {
+	return vulkan.Extent2D{
+		Width:  ctx.surface.capabilities.CurrentExtent.Width,
+		Height: ctx.surface.capabilities.CurrentExtent.Height,
+	}
+}
+
+func (ctx *Context) createSynchronizations() {
+	ctx.imageAvailableSemaphore = ctx.newSemaphore()
+	ctx.renderCompleteSemaphore = ctx.newSemaphore()
+}
+
+func (ctx *Context) destroySynchronizations() {
+	vulkan.DestroySemaphore(ctx.device, ctx.renderCompleteSemaphore, nil)
+	vulkan.DestroySemaphore(ctx.device, ctx.imageAvailableSemaphore, nil)
 }
 
 func (ctx *Context) newFence() vulkan.Fence {
@@ -396,133 +465,48 @@ func (ctx *Context) newFence() vulkan.Fence {
 	return fence
 }
 
-func (ctx *Context) createSynchronizations() {
-	ctx.swapchainImageAvailable = ctx.newFence()
-}
-
-func (ctx *Context) getActiveFramebuffer() vulkan.Framebuffer {
-	return ctx.framebuffers[ctx.activeSwapchainImageindex]
-}
-
-func (ctx *Context) getSurfaceSize() vulkan.Extent2D {
-	return vulkan.Extent2D{
-		Width:  ctx.surface.capabilities.CurrentExtent.Width,
-		Height: ctx.surface.capabilities.CurrentExtent.Height,
-	}
-}
-
-func (ctx *Context) beginRender() {
-	var activeSwapchainImage uint32
-	result := vulkan.AcquireNextImage(ctx.device, ctx.swapchain, vulkan.MaxUint64, nil, ctx.swapchainImageAvailable, &activeSwapchainImage)
-	panicOnError(result, "retrieve active swapchain image index")
-	ctx.activeSwapchainImageindex = activeSwapchainImage
-
-	result = vulkan.WaitForFences(ctx.device, 1, []vulkan.Fence{ctx.swapchainImageAvailable}, vulkan.True, vulkan.MaxUint64)
-	panicOnError(result, "wait for swapchain image fence")
-
-	result = vulkan.ResetFences(ctx.device, 1, []vulkan.Fence{ctx.swapchainImageAvailable})
-	panicOnError(result, "reset swapchain image fence")
-
-	//result = vulkan.QueueWaitIdle(ctx.graphicsQueue)
-	//panicOnError(result, "wait for graphics queue to be idle")
-}
-
-func (ctx *Context) endRender(waitSemaphores []vulkan.Semaphore) {
-	presentInfo := vulkan.PresentInfo{
-		SType:              vulkan.StructureTypePresentInfo,
-		WaitSemaphoreCount: uint32(len(waitSemaphores)),
-		PWaitSemaphores:    waitSemaphores,
-		SwapchainCount:     1,
-		PSwapchains:        []vulkan.Swapchain{ctx.swapchain},
-		PImageIndices:      []uint32{ctx.activeSwapchainImageindex},
-	}
-	result := vulkan.QueuePresent(ctx.graphicsQueue, &presentInfo)
-	panicOnError(result, "issue queue operations (draw call)")
-}
-
-func (ctx *Context) createCommandPool() {
-	commandPoolCreateInfo := vulkan.CommandPoolCreateInfo{
-		SType:            vulkan.StructureTypeCommandPoolCreateInfo,
-		Flags:            vulkan.CommandPoolCreateFlags(vulkan.CommandPoolCreateTransientBit | vulkan.CommandPoolCreateResetCommandBufferBit),
-		QueueFamilyIndex: ctx.gpu.queueFamilies.graphicsIndex,
-	}
-
-	var commandPool vulkan.CommandPool
-	result := vulkan.CreateCommandPool(ctx.device, &commandPoolCreateInfo, nil, &commandPool)
-	panicOnError(result, "create command pool")
-	ctx.commandPool = commandPool
-}
-
-func (ctx *Context) createCommandBuffer() {
-	commandBufferAllocateInfo := vulkan.CommandBufferAllocateInfo{
-		SType:              vulkan.StructureTypeCommandBufferAllocateInfo,
-		CommandPool:        ctx.commandPool,
-		Level:              vulkan.CommandBufferLevelPrimary,
-		CommandBufferCount: 1,
-	}
-
-	commandBuffers := make([]vulkan.CommandBuffer, 1)
-	result := vulkan.AllocateCommandBuffers(ctx.device, &commandBufferAllocateInfo, commandBuffers)
-	panicOnError(result, "allocate command buffer")
-	ctx.commandBuffer = commandBuffers[0]
-}
-
-func (ctx *Context) createRenderCompleteSemaphore() {
+func (ctx *Context) newSemaphore() vulkan.Semaphore {
 	semaphoreCreateInfo := vulkan.SemaphoreCreateInfo{
 		SType: vulkan.StructureTypeSemaphoreCreateInfo,
 	}
 
-	var renderCompleteSemaphore vulkan.Semaphore
-	result := vulkan.CreateSemaphore(ctx.device, &semaphoreCreateInfo, nil, &renderCompleteSemaphore)
-	panicOnError(result, "create render complete semaphore")
-	ctx.renderCompleteSemaphore = renderCompleteSemaphore
+	var semaphore vulkan.Semaphore
+	result := vulkan.CreateSemaphore(ctx.device, &semaphoreCreateInfo, nil, &semaphore)
+	panicOnError(result, "create semaphore")
+	return semaphore
 }
 
 func (ctx *Context) Render() {
-	ctx.beginRender()
+	var activeSwapchainImage uint32
+	result := vulkan.AcquireNextImage(ctx.device, ctx.swapchain, vulkan.MaxUint64, ctx.imageAvailableSemaphore, nil, &activeSwapchainImage)
+	panicOnError(result, "retrieve active swapchain image index")
 
-	commandBufferBeginInfo := vulkan.CommandBufferBeginInfo{
-		SType: vulkan.StructureTypeCommandBufferBeginInfo,
-		Flags: vulkan.CommandBufferUsageFlags(vulkan.CommandBufferUsageOneTimeSubmitBit),
-	}
-	vulkan.BeginCommandBuffer(ctx.commandBuffer, &commandBufferBeginInfo)
-
-	renderArea := vulkan.Rect2D{
-		Offset: vulkan.Offset2D{
-			X: 0,
-			Y: 0,
-		},
-		Extent: ctx.getSurfaceSize(),
-	}
-
-	clearValues := make([]vulkan.ClearValue, 2)
-	clearValues[0].SetDepthStencil(0.0, 0)
-	clearValues[1].SetColor([]float32{0.8, 0.2, 0.2, 1.0})
-
-	renderPassBeginInfo := vulkan.RenderPassBeginInfo{
-		SType:           vulkan.StructureTypeRenderPassBeginInfo,
-		RenderPass:      ctx.renderPass,
-		Framebuffer:     ctx.getActiveFramebuffer(),
-		RenderArea:      renderArea,
-		ClearValueCount: uint32(len(clearValues)),
-		PClearValues:    clearValues,
-	}
-	vulkan.CmdBeginRenderPass(ctx.commandBuffer, &renderPassBeginInfo, vulkan.SubpassContentsInline)
-	vulkan.CmdEndRenderPass(ctx.commandBuffer)
-
-	vulkan.EndCommandBuffer(ctx.commandBuffer)
-
+	pipelineStageFlags := vulkan.PipelineStageFlags(vulkan.PipelineStageColorAttachmentOutputBit)
 	submitInfo := vulkan.SubmitInfo{
 		SType:                vulkan.StructureTypeSubmitInfo,
-		WaitSemaphoreCount:   0,
-		PWaitSemaphores:      nil,
-		PWaitDstStageMask:    nil,
+		WaitSemaphoreCount:   1,
+		PWaitSemaphores:      []vulkan.Semaphore{ctx.imageAvailableSemaphore},
+		PWaitDstStageMask:    []vulkan.PipelineStageFlags{pipelineStageFlags},
 		CommandBufferCount:   1,
-		PCommandBuffers:      []vulkan.CommandBuffer{ctx.commandBuffer},
+		PCommandBuffers:      []vulkan.CommandBuffer{ctx.commandBuffers[activeSwapchainImage]},
 		SignalSemaphoreCount: 1,
 		PSignalSemaphores:    []vulkan.Semaphore{ctx.renderCompleteSemaphore},
 	}
-	vulkan.QueueSubmit(ctx.graphicsQueue, 1, []vulkan.SubmitInfo{submitInfo}, nil)
+	result = vulkan.QueueSubmit(ctx.graphicsQueue, 1, []vulkan.SubmitInfo{submitInfo}, nil)
+	panicOnError(result, "submit draw command buffer")
 
-	ctx.endRender([]vulkan.Semaphore{ctx.renderCompleteSemaphore})
+	presentInfo := vulkan.PresentInfo{
+		SType:              vulkan.StructureTypePresentInfo,
+		WaitSemaphoreCount: 1,
+		PWaitSemaphores:    []vulkan.Semaphore{ctx.renderCompleteSemaphore},
+		SwapchainCount:     1,
+		PSwapchains:        []vulkan.Swapchain{ctx.swapchain},
+		PImageIndices:      []uint32{activeSwapchainImage},
+	}
+	result = vulkan.QueuePresent(ctx.presentQueue, &presentInfo)
+	panicOnError(result, "queue present")
+
+	log.DebugfCore("Finished draw call (swapchain image %d), waiting for queue to be idle", activeSwapchainImage)
+	vulkan.QueueWaitIdle(ctx.presentQueue)
+	log.DebugCore("Queue idle, continuing")
 }

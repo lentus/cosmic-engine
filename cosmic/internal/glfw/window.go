@@ -43,7 +43,7 @@ func NewWindow(title string, width, height int, graphicsProps graphics.ContextPr
 	}
 
 	window.setCallbacks()
-	window.context = vulkan.NewContext(window.nativeWindow, graphicsProps.BufferingType)
+	window.context = vulkan.NewContext(window.nativeWindow)
 
 	return window
 }
@@ -107,8 +107,8 @@ func (w *glfwWindow) setCallbacks() {
 }
 
 func (w *glfwWindow) OnUpdate() {
-	//w.context.Render()
 	glfw.PollEvents()
+	w.context.Render()
 }
 
 func (w *glfwWindow) GetWidth() int {

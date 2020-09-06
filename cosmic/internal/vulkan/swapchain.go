@@ -24,39 +24,50 @@ func (ctx *Context) createSwapchain() {
 	ctx.surface.presentMode = pickPresentMode(getPresentModes(ctx.gpu.ref, ctx.surface.ref))
 
 	ctx.swapchainImageCount = determineImageCount(
-		ctx.swapchainImageCount, ctx.surface.capabilities.MinImageCount, ctx.surface.capabilities.MaxImageCount,
+		ctx.surface.capabilities.MinImageCount,
+		ctx.surface.capabilities.MaxImageCount,
 	)
+	log.DebugfCore("Requesting %d swapchain images", ctx.swapchainImageCount)
 
 	swapchainImageExtent := createImageExtent(ctx.surface.capabilities, ctx.nativeWindow)
 	swapchainCreateInfo := vulkan.SwapchainCreateInfo{
-		SType:                 vulkan.StructureTypeSwapchainCreateInfo,
-		Surface:               ctx.surface.ref,
-		MinImageCount:         ctx.swapchainImageCount,
-		ImageFormat:           ctx.surface.format.Format,
-		ImageColorSpace:       ctx.surface.format.ColorSpace,
-		ImageExtent:           swapchainImageExtent,
-		ImageArrayLayers:      1, // No stereoscopic rendering, which requires 2
-		ImageUsage:            vulkan.ImageUsageFlags(vulkan.ImageUsageColorAttachmentBit),
-		ImageSharingMode:      vulkan.SharingModeExclusive,
-		QueueFamilyIndexCount: 0,   // Ignored since sharing mode is exclusive
-		PQueueFamilyIndices:   nil, // Ignored since sharing mode is exclusive
-		PreTransform:          vulkan.SurfaceTransformIdentityBit,
-		CompositeAlpha:        vulkan.CompositeAlphaOpaqueBit,
-		PresentMode:           ctx.surface.presentMode,
-		Clipped:               vulkan.True,
-		OldSwapchain:          nil,
+		SType:            vulkan.StructureTypeSwapchainCreateInfo,
+		Surface:          ctx.surface.ref,
+		MinImageCount:    ctx.swapchainImageCount,
+		ImageFormat:      ctx.surface.format.Format,
+		ImageColorSpace:  ctx.surface.format.ColorSpace,
+		ImageExtent:      swapchainImageExtent,
+		ImageArrayLayers: 1, // No stereoscopic rendering, which requires 2
+		ImageUsage:       vulkan.ImageUsageFlags(vulkan.ImageUsageColorAttachmentBit),
+		PreTransform:     ctx.surface.capabilities.CurrentTransform,
+		CompositeAlpha:   vulkan.CompositeAlphaOpaqueBit,
+		PresentMode:      ctx.surface.presentMode,
+		Clipped:          vulkan.True,
+		OldSwapchain:     nil,
 	}
+
+	if ctx.gpu.queueFamilies.hasSeparatePresentQueue() {
+		swapchainCreateInfo.ImageSharingMode = vulkan.SharingModeConcurrent
+		swapchainCreateInfo.QueueFamilyIndexCount = 2
+		swapchainCreateInfo.PQueueFamilyIndices = []uint32{
+			ctx.gpu.queueFamilies.graphicsIndex,
+			ctx.gpu.queueFamilies.presentIndex,
+		}
+	} else {
+		swapchainCreateInfo.ImageSharingMode = vulkan.SharingModeExclusive
+	}
+
 	var swapchain vulkan.Swapchain
 	result := vulkan.CreateSwapchain(ctx.device, &swapchainCreateInfo, nil, &swapchain)
 	panicOnError(result, "create swapchain")
-
 	ctx.swapchain = swapchain
 
 	var swapchainImageCount uint32
 	result = vulkan.GetSwapchainImages(ctx.device, ctx.swapchain, &swapchainImageCount, nil)
 	panicOnError(result, "retrieve swapchain image count")
-
 	ctx.swapchainImageCount = swapchainImageCount
+
+	log.DebugfCore("Using %d swapchain images", ctx.swapchainImageCount)
 }
 
 func createImageExtent(capabilities vulkan.SurfaceCapabilities, nativeWindow *glfw.Window) vulkan.Extent2D {
@@ -86,18 +97,13 @@ func createImageExtent(capabilities vulkan.SurfaceCapabilities, nativeWindow *gl
 	return swapchainImageExtent
 }
 
-func determineImageCount(requested, min, max uint32) uint32 {
-	if requested < min+1 {
-		log.WarnfCore("Requested image count %d not supported by your system, min is %d", requested, min+1)
+func determineImageCount(min, max uint32) uint32 {
+	// Try to use one more than the minimum (recommended)
+	if min+1 > max {
+		return max
+	} else {
 		return min + 1
 	}
-
-	if max > 0 && requested > max {
-		log.WarnfCore("Requested image count %d not supported by your system, max is %d", requested, max)
-		return max
-	}
-
-	return requested
 }
 
 func (ctx *Context) createSwapchainImages() {
