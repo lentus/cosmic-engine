@@ -141,11 +141,11 @@ func (qf queueFamilies) hasSeparatePresentQueue() bool {
 func findQueueFamilies(device vulkan.PhysicalDevice, surface vulkan.Surface) queueFamilies {
 	var familyCount uint32
 	vulkan.GetPhysicalDeviceQueueFamilyProperties(device, &familyCount, nil)
-	queueFamiliePropertiesList := make([]vulkan.QueueFamilyProperties, familyCount)
-	vulkan.GetPhysicalDeviceQueueFamilyProperties(device, &familyCount, queueFamiliePropertiesList)
+	queueFamilyPropertiesList := make([]vulkan.QueueFamilyProperties, familyCount)
+	vulkan.GetPhysicalDeviceQueueFamilyProperties(device, &familyCount, queueFamilyPropertiesList)
 
 	var queueFamilies queueFamilies
-	for i, properties := range queueFamiliePropertiesList {
+	for i, properties := range queueFamilyPropertiesList {
 		properties.Deref()
 
 		if properties.QueueFlags&vulkan.QueueFlags(vulkan.QueueGraphicsBit) != 0 {

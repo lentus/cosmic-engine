@@ -5,7 +5,10 @@ import (
 	"github.com/vulkan-go/glfw/v3.3/glfw"
 	"github.com/vulkan-go/vulkan"
 	"strconv"
+	"time"
 )
+
+const maxFramesInFlight = 2
 
 type Context struct {
 	nativeWindow *glfw.Window
@@ -41,10 +44,14 @@ type Context struct {
 
 	debugCallback vulkan.DebugReportCallback
 
-	commandPool             vulkan.CommandPool
-	commandBuffers          []vulkan.CommandBuffer
-	imageAvailableSemaphore vulkan.Semaphore
-	renderCompleteSemaphore vulkan.Semaphore
+	commandPool    vulkan.CommandPool
+	commandBuffers []vulkan.CommandBuffer
+
+	imageAvailableSemaphores []vulkan.Semaphore
+	renderCompleteSemaphores []vulkan.Semaphore
+	frameInFlightFences      []vulkan.Fence
+	imagesInFlightFences     []vulkan.Fence
+	currentFrame             int
 }
 
 func NewContext(nativeWindow *glfw.Window) *Context {
@@ -85,9 +92,6 @@ func NewContext(nativeWindow *glfw.Window) *Context {
 	ctx.createCommandPool()
 	ctx.createCommandBuffers()
 	ctx.createSynchronizations()
-
-	// These are only here so I can test the vulkan implementation
-	//ctx.createRenderCompleteSemaphore()
 
 	return &ctx
 }
@@ -304,8 +308,8 @@ func (ctx *Context) createRenderPass() {
 		FinalLayout:    vulkan.ImageLayoutPresentSrc,
 	}
 
-	colorAttachments := make([]vulkan.AttachmentReference, 1)
-	colorAttachments[0] = vulkan.AttachmentReference{
+	colorAttachmentRefs := make([]vulkan.AttachmentReference, 1)
+	colorAttachmentRefs[0] = vulkan.AttachmentReference{
 		Attachment: 0, // Reference to the color attachment index
 		Layout:     vulkan.ImageLayoutColorAttachmentOptimal,
 	}
@@ -313,8 +317,8 @@ func (ctx *Context) createRenderPass() {
 	subPasses := make([]vulkan.SubpassDescription, 1)
 	subPasses[0] = vulkan.SubpassDescription{
 		PipelineBindPoint:    vulkan.PipelineBindPointGraphics,
-		ColorAttachmentCount: uint32(len(colorAttachments)),
-		PColorAttachments:    colorAttachments,
+		ColorAttachmentCount: uint32(len(colorAttachmentRefs)),
+		PColorAttachments:    colorAttachmentRefs,
 	}
 
 	// Make sure the subpass is not processed before it can write to the color attachment
@@ -362,7 +366,7 @@ func (ctx *Context) createFramebuffers() {
 
 		var framebuffer vulkan.Framebuffer
 		result := vulkan.CreateFramebuffer(ctx.device, &framebufferCreateInfo, nil, &framebuffer)
-		panicOnError(result, "create framebuffer for swapchain image "+strconv.Itoa(int(i)))
+		panicOnError(result, "create framebuffer for swapchain image "+strconv.Itoa(i))
 		ctx.framebuffers[i] = framebuffer
 	}
 }
@@ -401,18 +405,13 @@ func (ctx *Context) createCommandBuffers() {
 	// Record command buffers
 	for i := range ctx.commandBuffers {
 		beginInfo := vulkan.CommandBufferBeginInfo{
-			SType:            vulkan.StructureTypeCommandBufferBeginInfo,
-			Flags:            0,
-			PInheritanceInfo: nil,
+			SType: vulkan.StructureTypeCommandBufferBeginInfo,
 		}
 		result = vulkan.BeginCommandBuffer(ctx.commandBuffers[i], &beginInfo)
 		panicOnError(result, "start recording command buffer "+strconv.Itoa(i))
 
 		renderArea := vulkan.Rect2D{
-			Offset: vulkan.Offset2D{
-				X: 0,
-				Y: 0,
-			},
+			Offset: vulkan.Offset2D{X: 0, Y: 0},
 			Extent: ctx.getSurfaceSize(),
 		}
 
@@ -444,18 +443,31 @@ func (ctx *Context) getSurfaceSize() vulkan.Extent2D {
 }
 
 func (ctx *Context) createSynchronizations() {
-	ctx.imageAvailableSemaphore = ctx.newSemaphore()
-	ctx.renderCompleteSemaphore = ctx.newSemaphore()
+	ctx.imageAvailableSemaphores = make([]vulkan.Semaphore, maxFramesInFlight)
+	ctx.renderCompleteSemaphores = make([]vulkan.Semaphore, maxFramesInFlight)
+	ctx.frameInFlightFences = make([]vulkan.Fence, maxFramesInFlight)
+
+	for i := range ctx.imageAvailableSemaphores {
+		ctx.imageAvailableSemaphores[i] = ctx.newSemaphore()
+		ctx.renderCompleteSemaphores[i] = ctx.newSemaphore()
+		ctx.frameInFlightFences[i] = ctx.newFence()
+	}
+
+	ctx.imagesInFlightFences = make([]vulkan.Fence, ctx.swapchainImageCount)
 }
 
 func (ctx *Context) destroySynchronizations() {
-	vulkan.DestroySemaphore(ctx.device, ctx.renderCompleteSemaphore, nil)
-	vulkan.DestroySemaphore(ctx.device, ctx.imageAvailableSemaphore, nil)
+	for i := range ctx.frameInFlightFences {
+		vulkan.DestroyFence(ctx.device, ctx.frameInFlightFences[i], nil)
+		vulkan.DestroySemaphore(ctx.device, ctx.renderCompleteSemaphores[i], nil)
+		vulkan.DestroySemaphore(ctx.device, ctx.imageAvailableSemaphores[i], nil)
+	}
 }
 
 func (ctx *Context) newFence() vulkan.Fence {
 	fenceCreateInfo := vulkan.FenceCreateInfo{
 		SType: vulkan.StructureTypeFenceCreateInfo,
+		Flags: vulkan.FenceCreateFlags(vulkan.FenceCreateSignaledBit),
 	}
 
 	var fence vulkan.Fence
@@ -477,36 +489,73 @@ func (ctx *Context) newSemaphore() vulkan.Semaphore {
 }
 
 func (ctx *Context) Render() {
-	var activeSwapchainImage uint32
-	result := vulkan.AcquireNextImage(ctx.device, ctx.swapchain, vulkan.MaxUint64, ctx.imageAvailableSemaphore, nil, &activeSwapchainImage)
+	timeout := uint64(5 * time.Millisecond.Nanoseconds())
+
+	// Wait for frame to be presented if still in flight
+	result := vulkan.WaitForFences(
+		ctx.device, 1, []vulkan.Fence{ctx.frameInFlightFences[ctx.currentFrame]}, vulkan.True, timeout,
+	)
+	if result != vulkan.Success {
+		log.PanicfCore("%s while waiting for frame in flight fence %d", fmtResult(result), ctx.currentFrame)
+	}
+
+	var imageIndex uint32
+	result = vulkan.AcquireNextImage(
+		ctx.device, ctx.swapchain, vulkan.MaxUint64,
+		ctx.imageAvailableSemaphores[ctx.currentFrame],
+		vulkan.NullFence, &imageIndex,
+	)
 	panicOnError(result, "retrieve active swapchain image index")
+
+	// Check whether the swapchain image is currently in flight. After the first
+	// ctx.swpapchainImageCount frames these will always be filled, but waiting
+	// for fences that were already signalled is just a no-op.
+	if ctx.imagesInFlightFences[imageIndex] != nil {
+		result = vulkan.WaitForFences(
+			ctx.device, 1, []vulkan.Fence{ctx.imagesInFlightFences[imageIndex]}, vulkan.True, timeout,
+		)
+		if result != vulkan.Success {
+			log.PanicfCore("%s while waiting for image in flight fence %d", fmtResult(result), ctx.currentFrame)
+		}
+	}
+	ctx.imagesInFlightFences[imageIndex] = ctx.frameInFlightFences[ctx.currentFrame]
 
 	pipelineStageFlags := vulkan.PipelineStageFlags(vulkan.PipelineStageColorAttachmentOutputBit)
 	submitInfo := vulkan.SubmitInfo{
 		SType:                vulkan.StructureTypeSubmitInfo,
 		WaitSemaphoreCount:   1,
-		PWaitSemaphores:      []vulkan.Semaphore{ctx.imageAvailableSemaphore},
+		PWaitSemaphores:      []vulkan.Semaphore{ctx.imageAvailableSemaphores[ctx.currentFrame]},
 		PWaitDstStageMask:    []vulkan.PipelineStageFlags{pipelineStageFlags},
 		CommandBufferCount:   1,
-		PCommandBuffers:      []vulkan.CommandBuffer{ctx.commandBuffers[activeSwapchainImage]},
+		PCommandBuffers:      []vulkan.CommandBuffer{ctx.commandBuffers[imageIndex]},
 		SignalSemaphoreCount: 1,
-		PSignalSemaphores:    []vulkan.Semaphore{ctx.renderCompleteSemaphore},
+		PSignalSemaphores:    []vulkan.Semaphore{ctx.renderCompleteSemaphores[ctx.currentFrame]},
 	}
-	result = vulkan.QueueSubmit(ctx.graphicsQueue, 1, []vulkan.SubmitInfo{submitInfo}, nil)
+	vulkan.ResetFences(ctx.device, 1, []vulkan.Fence{ctx.frameInFlightFences[ctx.currentFrame]})
+	result = vulkan.QueueSubmit(
+		ctx.graphicsQueue, 1, []vulkan.SubmitInfo{submitInfo}, ctx.frameInFlightFences[ctx.currentFrame],
+	)
 	panicOnError(result, "submit draw command buffer")
+
+	// TODO DEBUG wait for command buffer to finish execution
+	result = vulkan.WaitForFences(
+		ctx.device, 1, []vulkan.Fence{ctx.frameInFlightFences[ctx.currentFrame]}, vulkan.True, timeout,
+	)
+	if result != vulkan.Success {
+		log.PanicfCore("%s while waiting for frame in flight fence %d", fmtResult(result), ctx.currentFrame)
+	}
 
 	presentInfo := vulkan.PresentInfo{
 		SType:              vulkan.StructureTypePresentInfo,
 		WaitSemaphoreCount: 1,
-		PWaitSemaphores:    []vulkan.Semaphore{ctx.renderCompleteSemaphore},
+		PWaitSemaphores:    []vulkan.Semaphore{ctx.renderCompleteSemaphores[ctx.currentFrame]},
 		SwapchainCount:     1,
 		PSwapchains:        []vulkan.Swapchain{ctx.swapchain},
-		PImageIndices:      []uint32{activeSwapchainImage},
+		PImageIndices:      []uint32{imageIndex},
 	}
 	result = vulkan.QueuePresent(ctx.presentQueue, &presentInfo)
 	panicOnError(result, "queue present")
 
-	log.DebugfCore("Finished draw call (swapchain image %d), waiting for queue to be idle", activeSwapchainImage)
-	vulkan.QueueWaitIdle(ctx.presentQueue)
-	log.DebugCore("Queue idle, continuing")
+	log.DebugfCore("Finished draw call (swapchain image %d, frame %d)", imageIndex, ctx.currentFrame)
+	ctx.currentFrame = (ctx.currentFrame + 1) % maxFramesInFlight
 }
