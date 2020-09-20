@@ -29,14 +29,14 @@ func (ctx *Context) createSwapchain() {
 	)
 	log.DebugfCore("Requesting %d swapchain images", ctx.swapchainImageCount)
 
-	swapchainImageExtent := createImageExtent(ctx.surface.capabilities, ctx.nativeWindow)
+	ctx.swapchainImageExtent = createImageExtent(ctx.surface.capabilities, ctx.nativeWindow)
 	swapchainCreateInfo := vulkan.SwapchainCreateInfo{
 		SType:            vulkan.StructureTypeSwapchainCreateInfo,
 		Surface:          ctx.surface.ref,
 		MinImageCount:    ctx.swapchainImageCount,
 		ImageFormat:      ctx.surface.format.Format,
 		ImageColorSpace:  ctx.surface.format.ColorSpace,
-		ImageExtent:      swapchainImageExtent,
+		ImageExtent:      ctx.swapchainImageExtent,
 		ImageArrayLayers: 1, // No stereoscopic rendering, which requires 2
 		ImageUsage:       vulkan.ImageUsageFlags(vulkan.ImageUsageColorAttachmentBit),
 		PreTransform:     ctx.surface.capabilities.CurrentTransform,

@@ -21,13 +21,17 @@ type Context struct {
 	graphicsQueue vulkan.Queue
 	presentQueue  vulkan.Queue
 
-	swapchain           vulkan.Swapchain
-	swapchainImageCount uint32
-	swapchainImages     []vulkan.Image
-	swapchainImageViews []vulkan.ImageView
+	swapchain            vulkan.Swapchain
+	swapchainImageCount  uint32
+	swapchainImages      []vulkan.Image
+	swapchainImageViews  []vulkan.ImageView
+	swapchainImageExtent vulkan.Extent2D
+
+	pipelineLayout   vulkan.PipelineLayout
+	renderPass       vulkan.RenderPass
+	graphicsPipeline vulkan.Pipeline
 
 	framebuffers []vulkan.Framebuffer
-	renderPass   vulkan.RenderPass
 
 	depthStencilFormat      vulkan.Format
 	depthStencilImage       vulkan.Image
@@ -85,8 +89,8 @@ func NewContext(nativeWindow *glfw.Window) *Context {
 	ctx.createSwapchainImages()
 
 	// Graphics pipeline
-	//ctx.createDepthStencilImage()
 	ctx.createRenderPass()
+	ctx.createGraphicsPipeline()
 	ctx.createFramebuffers()
 
 	ctx.createCommandPool()
@@ -98,16 +102,17 @@ func NewContext(nativeWindow *glfw.Window) *Context {
 
 func (ctx *Context) Terminate() {
 	log.DebugCore("Terminating Vulkan graphics context")
-	vulkan.DeviceWaitIdle(ctx.device) // Wait for the graphics queue to be idle
+	vulkan.DeviceWaitIdle(ctx.device) // Wait for the device to be idle
 
 	ctx.destroySynchronizations()
 	vulkan.DestroyCommandPool(ctx.device, ctx.commandPool, nil)
-
 	ctx.destroyFramebuffers()
-	vulkan.DestroyRenderPass(ctx.device, ctx.renderPass, nil)
-	//ctx.destroyDepthStencilImage()
+
+	ctx.destroyGraphicsPipeline()
+
 	ctx.destroySwapchainImageViews()
 	vulkan.DestroySwapchain(ctx.device, ctx.swapchain, nil) // Destroys swapchain images as well
+
 	vulkan.DestroySurface(ctx.instance, ctx.surface.ref, nil)
 	vulkan.DestroyDevice(ctx.device, nil)
 	vulkan.DestroyDebugReportCallback(ctx.instance, ctx.debugCallback, nil)
@@ -182,115 +187,6 @@ func (ctx *Context) createLogicalDevice() {
 	var presentQueue vulkan.Queue
 	vulkan.GetDeviceQueue(ctx.device, ctx.gpu.queueFamilies.presentIndex, 0, &presentQueue)
 	ctx.presentQueue = presentQueue
-}
-
-func (ctx *Context) createDepthStencilImage() {
-	log.DebugCore("Creating Vulkan depth stencil image")
-
-	// Take the first supported format of the following formats
-	desiredFormats := []vulkan.Format{
-		vulkan.FormatD32SfloatS8Uint,
-		vulkan.FormatD24UnormS8Uint,
-		vulkan.FormatD16UnormS8Uint,
-		vulkan.FormatD32Sfloat,
-		vulkan.FormatD16Unorm,
-	}
-	for _, format := range desiredFormats {
-		var formatProps vulkan.FormatProperties
-		vulkan.GetPhysicalDeviceFormatProperties(ctx.gpu.ref, format, &formatProps)
-		formatProps.Deref()
-
-		if formatProps.OptimalTilingFeatures&vulkan.FormatFeatureFlags(vulkan.FormatFeatureDepthStencilAttachmentBit) != 0 {
-			ctx.depthStencilFormat = format
-			break
-		}
-	}
-
-	if ctx.depthStencilFormat == vulkan.FormatUndefined {
-		log.PanicCore("None of the desired depth stencil formats are supported")
-	}
-
-	// Check whether stencil is available
-	ctx.stencilAvailable = ctx.depthStencilFormat == vulkan.FormatD32SfloatS8Uint ||
-		ctx.depthStencilFormat == vulkan.FormatD24UnormS8Uint ||
-		ctx.depthStencilFormat == vulkan.FormatD16UnormS8Uint ||
-		ctx.depthStencilFormat == vulkan.FormatD32Sfloat
-
-	imageCreateInfo := vulkan.ImageCreateInfo{
-		SType:     vulkan.StructureTypeImageCreateInfo,
-		Flags:     0,
-		ImageType: vulkan.ImageType2d,
-		Format:    ctx.depthStencilFormat,
-		Extent: vulkan.Extent3D{
-			Width:  ctx.surface.capabilities.CurrentExtent.Width,
-			Height: ctx.surface.capabilities.CurrentExtent.Height,
-			Depth:  1,
-		},
-		MipLevels:             1,
-		ArrayLayers:           1,
-		Samples:               vulkan.SampleCount1Bit,
-		Tiling:                vulkan.ImageTilingOptimal,
-		Usage:                 vulkan.ImageUsageFlags(vulkan.ImageUsageDepthStencilAttachmentBit),
-		SharingMode:           vulkan.SharingModeExclusive,
-		QueueFamilyIndexCount: 0,   // Ignored because of exclusive mode
-		PQueueFamilyIndices:   nil, // Ignored because of exclusive mode
-		InitialLayout:         vulkan.ImageLayoutUndefined,
-	}
-
-	var depthStencilImage vulkan.Image
-	result := vulkan.CreateImage(ctx.device, &imageCreateInfo, nil, &depthStencilImage)
-	panicOnError(result, "create depth stencil image")
-	ctx.depthStencilImage = depthStencilImage
-
-	var imageMemoryRequirements vulkan.MemoryRequirements
-	vulkan.GetImageMemoryRequirements(ctx.device, ctx.depthStencilImage, &imageMemoryRequirements)
-	imageMemoryRequirements.Deref()
-
-	memoryTypeIndex := ctx.findMemoryTypeIndex(&imageMemoryRequirements, vulkan.MemoryPropertyFlags(vulkan.MemoryPropertyDeviceLocalBit))
-	if memoryTypeIndex == vulkan.MaxUint32 {
-		log.PanicCore("Could not find memory type to allocate depth stencil image memory")
-	}
-
-	memoryAllocateInfo := vulkan.MemoryAllocateInfo{
-		SType:           vulkan.StructureTypeMemoryAllocateInfo,
-		AllocationSize:  imageMemoryRequirements.Size,
-		MemoryTypeIndex: memoryTypeIndex,
-	}
-	var depthStencilImageMemory vulkan.DeviceMemory
-	vulkan.AllocateMemory(ctx.device, &memoryAllocateInfo, nil, &depthStencilImageMemory)
-	ctx.depthStencilImageMemory = depthStencilImageMemory
-	vulkan.BindImageMemory(ctx.device, ctx.depthStencilImage, ctx.depthStencilImageMemory, 0)
-
-	aspectMask := vulkan.ImageAspectDepthBit
-	if ctx.stencilAvailable {
-		aspectMask |= vulkan.ImageAspectStencilBit
-	}
-
-	imageViewCreateInfo := vulkan.ImageViewCreateInfo{
-		SType:      vulkan.StructureTypeImageViewCreateInfo,
-		Image:      ctx.depthStencilImage,
-		ViewType:   vulkan.ImageViewType2d,
-		Format:     ctx.depthStencilFormat,
-		Components: vulkan.ComponentMapping{}, // Use identity mapping for rgba components
-		SubresourceRange: vulkan.ImageSubresourceRange{
-			AspectMask:     vulkan.ImageAspectFlags(aspectMask),
-			BaseMipLevel:   0,
-			LevelCount:     1,
-			BaseArrayLayer: 0,
-			LayerCount:     1,
-		},
-	}
-
-	var depthStencilImageView vulkan.ImageView
-	result = vulkan.CreateImageView(ctx.device, &imageViewCreateInfo, nil, &depthStencilImageView)
-	panicOnError(result, "create depth stencil image view")
-	ctx.depthStencilImageView = depthStencilImageView
-}
-
-func (ctx *Context) destroyDepthStencilImage() {
-	vulkan.DestroyImageView(ctx.device, ctx.depthStencilImageView, nil)
-	vulkan.FreeMemory(ctx.device, ctx.depthStencilImageMemory, nil)
-	vulkan.DestroyImage(ctx.device, ctx.depthStencilImage, nil)
 }
 
 func (ctx *Context) createRenderPass() {
@@ -412,7 +308,10 @@ func (ctx *Context) createCommandBuffers() {
 
 		renderArea := vulkan.Rect2D{
 			Offset: vulkan.Offset2D{X: 0, Y: 0},
-			Extent: ctx.getSurfaceSize(),
+			Extent: vulkan.Extent2D{
+				Width:  ctx.swapchainImageExtent.Width,
+				Height: ctx.swapchainImageExtent.Height,
+			},
 		}
 
 		clearValues := make([]vulkan.ClearValue, 1)
@@ -428,17 +327,12 @@ func (ctx *Context) createCommandBuffers() {
 		}
 
 		vulkan.CmdBeginRenderPass(ctx.commandBuffers[i], &renderPassBeginInfo, vulkan.SubpassContentsInline)
+		vulkan.CmdBindPipeline(ctx.commandBuffers[i], vulkan.PipelineBindPointGraphics, ctx.graphicsPipeline)
+		vulkan.CmdDraw(ctx.commandBuffers[i], 3, 1, 0, 0)
 		vulkan.CmdEndRenderPass(ctx.commandBuffers[i])
 
 		result = vulkan.EndCommandBuffer(ctx.commandBuffers[i])
 		panicOnError(result, "stop recording command buffer "+strconv.Itoa(i))
-	}
-}
-
-func (ctx *Context) getSurfaceSize() vulkan.Extent2D {
-	return vulkan.Extent2D{
-		Width:  ctx.surface.capabilities.CurrentExtent.Width,
-		Height: ctx.surface.capabilities.CurrentExtent.Height,
 	}
 }
 

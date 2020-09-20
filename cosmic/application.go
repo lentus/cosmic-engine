@@ -33,12 +33,19 @@ func (app *Application) run() {
 	defer app.window.Terminate()
 
 	app.running = true
+	frame := 0 // TODO DEBUG
 	for app.running {
 		app.window.OnUpdate()
 
 		// Update all layers
 		for it := app.layerStack.Bottom(); it.Next(); {
 			it.Get().OnUpdate()
+		}
+		frame++ // TODO DEBUG
+
+		// TODO DEBUG
+		if frame >= 2 {
+			app.running = false
 		}
 	}
 }
