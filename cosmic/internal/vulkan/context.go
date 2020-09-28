@@ -23,15 +23,13 @@ type Context struct {
 
 	swapchain            vulkan.Swapchain
 	swapchainImageCount  uint32
-	swapchainImages      []vulkan.Image
-	swapchainImageViews  []vulkan.ImageView
 	swapchainImageExtent vulkan.Extent2D
+
+	imageResourceSets []imageResourceSet
 
 	pipelineLayout   vulkan.PipelineLayout
 	renderPass       vulkan.RenderPass
 	graphicsPipeline vulkan.Pipeline
-
-	framebuffers []vulkan.Framebuffer
 
 	depthStencilFormat      vulkan.Format
 	depthStencilImage       vulkan.Image
@@ -48,8 +46,7 @@ type Context struct {
 
 	debugCallback vulkan.DebugReportCallback
 
-	commandPool    vulkan.CommandPool
-	commandBuffers []vulkan.CommandBuffer
+	commandPool vulkan.CommandPool
 
 	imageAvailableSemaphores []vulkan.Semaphore
 	renderCompleteSemaphores []vulkan.Semaphore
@@ -223,8 +220,8 @@ func (ctx *Context) createRenderPass() {
 		SrcSubpass:    vulkan.SubpassExternal,
 		DstSubpass:    0,
 		SrcStageMask:  vulkan.PipelineStageFlags(vulkan.PipelineStageColorAttachmentOutputBit),
+		SrcAccessMask: vulkan.AccessFlags(0),
 		DstStageMask:  vulkan.PipelineStageFlags(vulkan.PipelineStageColorAttachmentOutputBit),
-		SrcAccessMask: 0,
 		DstAccessMask: vulkan.AccessFlags(vulkan.AccessColorAttachmentWriteBit),
 	}
 
@@ -245,10 +242,8 @@ func (ctx *Context) createRenderPass() {
 }
 
 func (ctx *Context) createFramebuffers() {
-	ctx.framebuffers = make([]vulkan.Framebuffer, ctx.swapchainImageCount)
-
-	for i := range ctx.framebuffers {
-		attachments := []vulkan.ImageView{ctx.swapchainImageViews[i]}
+	for i := range ctx.imageResourceSets {
+		attachments := []vulkan.ImageView{ctx.imageResourceSets[i].view}
 
 		framebufferCreateInfo := vulkan.FramebufferCreateInfo{
 			SType:           vulkan.StructureTypeFramebufferCreateInfo,
@@ -263,13 +258,13 @@ func (ctx *Context) createFramebuffers() {
 		var framebuffer vulkan.Framebuffer
 		result := vulkan.CreateFramebuffer(ctx.device, &framebufferCreateInfo, nil, &framebuffer)
 		panicOnError(result, "create framebuffer for swapchain image "+strconv.Itoa(i))
-		ctx.framebuffers[i] = framebuffer
+		ctx.imageResourceSets[i].framebuffer = framebuffer
 	}
 }
 
 func (ctx *Context) destroyFramebuffers() {
-	for _, framebuffer := range ctx.framebuffers {
-		vulkan.DestroyFramebuffer(ctx.device, framebuffer, nil)
+	for _, imageResourceSet := range ctx.imageResourceSets {
+		vulkan.DestroyFramebuffer(ctx.device, imageResourceSet.framebuffer, nil)
 	}
 }
 
@@ -287,23 +282,25 @@ func (ctx *Context) createCommandPool() {
 }
 
 func (ctx *Context) createCommandBuffers() {
-	ctx.commandBuffers = make([]vulkan.CommandBuffer, ctx.swapchainImageCount)
+	commandBuffers := make([]vulkan.CommandBuffer, ctx.swapchainImageCount)
 	commandBufferAllocateInfo := vulkan.CommandBufferAllocateInfo{
 		SType:              vulkan.StructureTypeCommandBufferAllocateInfo,
 		CommandPool:        ctx.commandPool,
 		Level:              vulkan.CommandBufferLevelPrimary,
-		CommandBufferCount: uint32(len(ctx.commandBuffers)),
+		CommandBufferCount: uint32(len(commandBuffers)),
 	}
 
-	result := vulkan.AllocateCommandBuffers(ctx.device, &commandBufferAllocateInfo, ctx.commandBuffers)
+	result := vulkan.AllocateCommandBuffers(ctx.device, &commandBufferAllocateInfo, commandBuffers)
 	panicOnError(result, "allocate command buffers")
 
 	// Record command buffers
-	for i := range ctx.commandBuffers {
+	for i := range ctx.imageResourceSets {
+		ctx.imageResourceSets[i].commandBuffer = commandBuffers[i]
+
 		beginInfo := vulkan.CommandBufferBeginInfo{
 			SType: vulkan.StructureTypeCommandBufferBeginInfo,
 		}
-		result = vulkan.BeginCommandBuffer(ctx.commandBuffers[i], &beginInfo)
+		result = vulkan.BeginCommandBuffer(ctx.imageResourceSets[i].commandBuffer, &beginInfo)
 		panicOnError(result, "start recording command buffer "+strconv.Itoa(i))
 
 		renderArea := vulkan.Rect2D{
@@ -320,18 +317,18 @@ func (ctx *Context) createCommandBuffers() {
 		renderPassBeginInfo := vulkan.RenderPassBeginInfo{
 			SType:           vulkan.StructureTypeRenderPassBeginInfo,
 			RenderPass:      ctx.renderPass,
-			Framebuffer:     ctx.framebuffers[i],
+			Framebuffer:     ctx.imageResourceSets[i].framebuffer,
 			RenderArea:      renderArea,
 			ClearValueCount: uint32(len(clearValues)),
 			PClearValues:    clearValues,
 		}
 
-		vulkan.CmdBeginRenderPass(ctx.commandBuffers[i], &renderPassBeginInfo, vulkan.SubpassContentsInline)
-		vulkan.CmdBindPipeline(ctx.commandBuffers[i], vulkan.PipelineBindPointGraphics, ctx.graphicsPipeline)
-		vulkan.CmdDraw(ctx.commandBuffers[i], 3, 1, 0, 0)
-		vulkan.CmdEndRenderPass(ctx.commandBuffers[i])
+		vulkan.CmdBeginRenderPass(ctx.imageResourceSets[i].commandBuffer, &renderPassBeginInfo, vulkan.SubpassContentsInline)
+		vulkan.CmdBindPipeline(ctx.imageResourceSets[i].commandBuffer, vulkan.PipelineBindPointGraphics, ctx.graphicsPipeline)
+		vulkan.CmdDraw(ctx.imageResourceSets[i].commandBuffer, 3, 1, 0, 0)
+		vulkan.CmdEndRenderPass(ctx.imageResourceSets[i].commandBuffer)
 
-		result = vulkan.EndCommandBuffer(ctx.commandBuffers[i])
+		result = vulkan.EndCommandBuffer(ctx.imageResourceSets[i].commandBuffer)
 		panicOnError(result, "stop recording command buffer "+strconv.Itoa(i))
 	}
 }
@@ -421,7 +418,7 @@ func (ctx *Context) Render() {
 		PWaitSemaphores:      []vulkan.Semaphore{ctx.imageAvailableSemaphores[ctx.currentFrame]},
 		PWaitDstStageMask:    []vulkan.PipelineStageFlags{pipelineStageFlags},
 		CommandBufferCount:   1,
-		PCommandBuffers:      []vulkan.CommandBuffer{ctx.commandBuffers[imageIndex]},
+		PCommandBuffers:      []vulkan.CommandBuffer{ctx.imageResourceSets[imageIndex].commandBuffer},
 		SignalSemaphoreCount: 1,
 		PSignalSemaphores:    []vulkan.Semaphore{ctx.renderCompleteSemaphores[ctx.currentFrame]},
 	}

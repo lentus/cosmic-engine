@@ -106,17 +106,27 @@ func determineImageCount(min, max uint32) uint32 {
 	}
 }
 
+type imageResourceSet struct {
+	image         vulkan.Image
+	view          vulkan.ImageView
+	commandBuffer vulkan.CommandBuffer
+	framebuffer   vulkan.Framebuffer
+}
+
 func (ctx *Context) createSwapchainImages() {
 	log.DebugCore("Creating Vulkan swapchain images")
-	ctx.swapchainImages = make([]vulkan.Image, ctx.swapchainImageCount)
-	result := vulkan.GetSwapchainImages(ctx.device, ctx.swapchain, &ctx.swapchainImageCount, ctx.swapchainImages)
+
+	swapchainImages := make([]vulkan.Image, ctx.swapchainImageCount)
+	result := vulkan.GetSwapchainImages(ctx.device, ctx.swapchain, &ctx.swapchainImageCount, swapchainImages)
 	panicOnError(result, "create swapchain images")
 
-	ctx.swapchainImageViews = make([]vulkan.ImageView, ctx.swapchainImageCount)
-	for i := range ctx.swapchainImageViews {
+	ctx.imageResourceSets = make([]imageResourceSet, ctx.swapchainImageCount)
+	for i := range ctx.imageResourceSets {
+		ctx.imageResourceSets[i].image = swapchainImages[i]
+
 		imageViewCreateInfo := vulkan.ImageViewCreateInfo{
 			SType:      vulkan.StructureTypeImageViewCreateInfo,
-			Image:      ctx.swapchainImages[i],
+			Image:      ctx.imageResourceSets[i].image,
 			ViewType:   vulkan.ImageViewType2d,
 			Format:     ctx.surface.format.Format,
 			Components: vulkan.ComponentMapping{}, // Use identity mapping for rgba components
@@ -132,12 +142,12 @@ func (ctx *Context) createSwapchainImages() {
 		var imageView vulkan.ImageView
 		result = vulkan.CreateImageView(ctx.device, &imageViewCreateInfo, nil, &imageView)
 		panicOnError(result, fmt.Sprintf("create swapchain image view nr %d", i))
-		ctx.swapchainImageViews[i] = imageView
+		ctx.imageResourceSets[i].view = imageView
 	}
 }
 
 func (ctx *Context) destroySwapchainImageViews() {
-	for _, imageView := range ctx.swapchainImageViews {
-		vulkan.DestroyImageView(ctx.device, imageView, nil)
+	for _, imageResourceSet := range ctx.imageResourceSets {
+		vulkan.DestroyImageView(ctx.device, imageResourceSet.view, nil)
 	}
 }
