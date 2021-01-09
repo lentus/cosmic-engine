@@ -99,7 +99,7 @@ func NewContext(nativeWindow *glfw.Window) *Context {
 
 func (ctx *Context) Terminate() {
 	log.DebugCore("Terminating Vulkan graphics context")
-	vulkan.DeviceWaitIdle(ctx.device) // Wait for the device to be idle
+	vulkan.DeviceWaitIdle(ctx.device) // Wait for the GPU to be idle
 
 	ctx.destroySynchronizations()
 	vulkan.DestroyCommandPool(ctx.device, ctx.commandPool, nil)
@@ -380,7 +380,7 @@ func (ctx *Context) newSemaphore() vulkan.Semaphore {
 }
 
 func (ctx *Context) Render() {
-	timeout := uint64(5 * time.Millisecond.Nanoseconds())
+	timeout := uint64(10 * time.Millisecond.Nanoseconds())
 
 	// Wait for frame to be presented if still in flight
 	result := vulkan.WaitForFences(
@@ -399,7 +399,7 @@ func (ctx *Context) Render() {
 	panicOnError(result, "retrieve active swapchain image index")
 
 	// Check whether the swapchain image is currently in flight. After the first
-	// ctx.swpapchainImageCount frames these will always be filled, but waiting
+	// ctx.swapchainImageCount frames these will always be filled, but waiting
 	// for fences that were already signalled is just a no-op.
 	if ctx.imagesInFlightFences[imageIndex] != nil {
 		result = vulkan.WaitForFences(
@@ -428,14 +428,6 @@ func (ctx *Context) Render() {
 	)
 	panicOnError(result, "submit draw command buffer")
 
-	// TODO DEBUG wait for command buffer to finish execution
-	result = vulkan.WaitForFences(
-		ctx.device, 1, []vulkan.Fence{ctx.frameInFlightFences[ctx.currentFrame]}, vulkan.True, timeout,
-	)
-	if result != vulkan.Success {
-		log.PanicfCore("%s while waiting for frame in flight fence %d", fmtResult(result), ctx.currentFrame)
-	}
-
 	presentInfo := vulkan.PresentInfo{
 		SType:              vulkan.StructureTypePresentInfo,
 		WaitSemaphoreCount: 1,
@@ -447,6 +439,5 @@ func (ctx *Context) Render() {
 	result = vulkan.QueuePresent(ctx.presentQueue, &presentInfo)
 	panicOnError(result, "queue present")
 
-	log.DebugfCore("Finished draw call (swapchain image %d, frame %d)", imageIndex, ctx.currentFrame)
 	ctx.currentFrame = (ctx.currentFrame + 1) % maxFramesInFlight
 }
