@@ -94,7 +94,7 @@ func fmtResult(error vulkan.Result) string {
 		errName = "unknown code"
 	}
 
-	return fmt.Sprintf("%d (%s)", error, errName)
+	return fmt.Sprintf("%s (%d)", errName, error)
 }
 
 func fmtObjectType(objectType vulkan.DebugReportObjectType) string {

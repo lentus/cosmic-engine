@@ -53,6 +53,7 @@ type Context struct {
 	frameInFlightFences      []vulkan.Fence
 	imagesInFlightFences     []vulkan.Fence
 	currentFrame             int
+	framebufferResized       bool
 }
 
 func NewContext(nativeWindow *glfw.Window) *Context {
@@ -99,21 +100,19 @@ func NewContext(nativeWindow *glfw.Window) *Context {
 
 func (ctx *Context) Terminate() {
 	log.DebugCore("Terminating Vulkan graphics context")
-	vulkan.DeviceWaitIdle(ctx.device) // Wait for the GPU to be idle
 
+	// cleanupSwapchain is responsible to wait for the gpu to be idle
+	ctx.cleanupSwapchain()
 	ctx.destroySynchronizations()
 	vulkan.DestroyCommandPool(ctx.device, ctx.commandPool, nil)
-	ctx.destroyFramebuffers()
-
-	ctx.destroyGraphicsPipeline()
-
-	ctx.destroySwapchainImageViews()
-	vulkan.DestroySwapchain(ctx.device, ctx.swapchain, nil) // Destroys swapchain images as well
-
 	vulkan.DestroySurface(ctx.instance, ctx.surface.ref, nil)
 	vulkan.DestroyDevice(ctx.device, nil)
 	vulkan.DestroyDebugReportCallback(ctx.instance, ctx.debugCallback, nil)
 	vulkan.DestroyInstance(ctx.instance, nil)
+}
+
+func (ctx *Context) SignalFramebufferResized() {
+	ctx.framebufferResized = true
 }
 
 func (ctx *Context) createVulkanInstance() {
@@ -262,6 +261,44 @@ func (ctx *Context) createFramebuffers() {
 	}
 }
 
+func (ctx *Context) cleanupSwapchain() {
+	vulkan.DeviceWaitIdle(ctx.device)
+
+	ctx.destroyFramebuffers()
+
+	cmdBuffers := make([]vulkan.CommandBuffer, len(ctx.imageResourceSets))
+	for i, resourceSet := range ctx.imageResourceSets {
+		cmdBuffers[i] = resourceSet.commandBuffer
+	}
+	vulkan.FreeCommandBuffers(ctx.device, ctx.commandPool, 1, cmdBuffers)
+
+	ctx.destroyGraphicsPipeline()
+	ctx.destroySwapchainImageViews()
+	vulkan.DestroySwapchain(ctx.device, ctx.swapchain, nil) // Destroys swapchain images as well
+}
+
+func (ctx *Context) recreateSwapchain() {
+	// Handle minimization
+	width, height := ctx.nativeWindow.GetSize()
+	for width == 0 || height == 0 {
+		log.DebugCore("Minimized")
+		width, height = ctx.nativeWindow.GetSize()
+		// Note that the below function may ONLY be called from the MAIN THREAD!
+		glfw.WaitEvents()
+	}
+
+	vulkan.DeviceWaitIdle(ctx.device)
+
+	ctx.cleanupSwapchain()
+
+	ctx.createSwapchain()
+	ctx.createSwapchainImages()
+	ctx.createRenderPass()
+	ctx.createGraphicsPipeline()
+	ctx.createFramebuffers()
+	ctx.createCommandBuffers()
+}
+
 func (ctx *Context) destroyFramebuffers() {
 	for _, imageResourceSet := range ctx.imageResourceSets {
 		vulkan.DestroyFramebuffer(ctx.device, imageResourceSet.framebuffer, nil)
@@ -392,10 +429,13 @@ func (ctx *Context) Render() {
 
 	var imageIndex uint32
 	result = vulkan.AcquireNextImage(
-		ctx.device, ctx.swapchain, vulkan.MaxUint64,
-		ctx.imageAvailableSemaphores[ctx.currentFrame],
-		vulkan.NullFence, &imageIndex,
+		ctx.device, ctx.swapchain, vulkan.MaxUint64, ctx.imageAvailableSemaphores[ctx.currentFrame], vulkan.NullFence, &imageIndex,
 	)
+	if result == vulkan.ErrorOutOfDate {
+		ctx.recreateSwapchain()
+		// Try drawing again next frame
+		return
+	}
 	panicOnError(result, "retrieve active swapchain image index")
 
 	// Check whether the swapchain image is currently in flight. After the first
@@ -437,7 +477,12 @@ func (ctx *Context) Render() {
 		PImageIndices:      []uint32{imageIndex},
 	}
 	result = vulkan.QueuePresent(ctx.presentQueue, &presentInfo)
-	panicOnError(result, "queue present")
+	if result == vulkan.ErrorOutOfDate || result == vulkan.Suboptimal || ctx.framebufferResized {
+		ctx.framebufferResized = false
+		ctx.recreateSwapchain()
+	} else if result != vulkan.Success {
+		panicOnError(result, "queue present")
+	}
 
 	ctx.currentFrame = (ctx.currentFrame + 1) % maxFramesInFlight
 }

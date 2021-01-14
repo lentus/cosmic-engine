@@ -29,7 +29,7 @@ func NewWindow(title string, width, height int, graphicsProps graphics.ContextPr
 		log.PanicfCore("Failed to initialise GLFW - %s", err.Error())
 	}
 
-	glfw.WindowHint(glfw.Resizable, glfw.False)
+	//glfw.WindowHint(glfw.Resizable, glfw.False)
 	if window.vsync {
 		glfw.WindowHint(glfw.RefreshRate, glfw.True)
 	} else {
@@ -53,7 +53,8 @@ func (w *glfwWindow) setCallbacks() {
 		w.eventCallback(&event.WindowClose{})
 	})
 
-	w.nativeWindow.SetSizeCallback(func(window *glfw.Window, width int, height int) {
+	w.nativeWindow.SetFramebufferSizeCallback(func(window *glfw.Window, width int, height int) {
+		w.context.SignalFramebufferResized()
 		w.eventCallback(&event.WindowResize{Width: width, Height: height})
 	})
 
